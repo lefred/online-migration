@@ -1,0 +1,12 @@
+CREATE DATABASE fred;
+USE fred
+#table: b
+CREATE TABLE `b` (
+  `a` int(11) NOT NULL AUTO_INCREMENT,
+  PRIMARY KEY (`a`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+#table: t
+CREATE TABLE `t` (
+  `i` int(11) NOT NULL UNIQUE,
+  `name` varchar(20) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;

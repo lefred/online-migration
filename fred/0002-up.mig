@@ -1,0 +1,3 @@
+t::  add (  nationality varchar(20) ); 
+OM_IGNORE_TABLE::create table countries ( code char(2) primary key, name varchar (30));  
+OM_IGNORE_TABLE::insert into countries values ('BE','BELGIUM'),('IT','ITALY'); 
