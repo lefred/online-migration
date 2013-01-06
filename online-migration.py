@@ -6,19 +6,26 @@ import inspect
 import hashlib
 import re
 import glob
+import StringIO
 
 sys.path.append("./mysql")
 from database import Database
 from table import Table
 from server import get_server
 from subprocess import call
-from dbcompare import get_common_objects_mig
-from dbcompare import diff_objects_mig, get_object_bef_mig
+from mysql.utilities.common.options import parse_connection
+from mysql.utilities.command import dbcopy
+from mysql.utilities.command.dbcompare import database_compare
+from contextlib import contextmanager
+
+#from dbcompare import get_common_objects_mig
+#from dbcompare import diff_objects_mig, get_object_bef_mig
 
 server=get_server("localhost","root@localhost:3306", False)
 database = "online_migration"
 table = "migration_sys"
 dbtable = database + "." + table
+tmp_prefix="tmp_online_mig"
 
 # function to connect to MySQL
 def connect_db(server,database):
@@ -110,12 +117,19 @@ def call_online_schema_change(db_name, version, file_name):
                print "ERROR: %s !" % e 
                sys.exit(1)
            
+           # create the undo for table creation here
+           file_down = open("%s/%04d-down.mig" % (db_name, int(version)), 'a')
+           if re.search('^create',query, re.IGNORECASE):
+               regex = re.compile("create\s+table\s+(\w+)",re.IGNORECASE)
+               r = regex.search(line)
+               table=r.group(1)
+               file_down.write("DROP TABLE %s;\n" % table)
+           file_down.close()
+           
        else:
            cmd="./pt-online-schema-change h=localhost,u=root,D=\"%s\",t=%s --alter=\"%s\" --execute >>online_migration.log 2>&1" % (db_name, line_list[0], line_list[1])
            #print cmd
-           if call(cmd, shell=True) == 0:
-               print "online schema change run successfully"
-           else:
+           if call(cmd, shell=True) != 0:
                print "ERROR: problem while running :\n   %s" % cmd
                sys.exit(1)
     call_change_migration_status(db_name,version,'ok')
@@ -362,6 +376,15 @@ def call_mysql_create_schema(db_name, file_name):
         sys.exit(1)
     call_change_migration_status(db_name, 0, 'ok')
     
+@contextmanager
+def capture():
+    old_stdout = sys.stdout
+    sys.stdout = StringIO.StringIO()
+    try:
+        yield sys.stdout
+    finally:
+        sys.stdout = old_stdout    
+
 # Main program
 if len(sys.argv) < 2:
     print "ERROR: a command is needed"
@@ -408,41 +431,41 @@ else:
             if not os.path.exists("%s/%04d-up.mig" % (db_name, int(version))):        
                 print "\nNo migration available"
             else:
-                print "Preparing migration to version %s" % version
+                print "Preparing migration to version %04d" % int(version)
+                if os.path.exists("%s/%04d-down.mig" % (db_name, int(version))):        
+                    os.remove("%s/%04d-down.mig" % (db_name, int(version))) 
+                    
                 (ver,md5,comment)=read_meta(db_name, int(version))
                 
-                # connect to db a get all objects
-                db_obj=connect_db(server,db_name)
-                db_obj.init()
-                db_objects_bef = db_obj.objects
-                db_objects_bef.sort() 
-                print "FRED %s" % db_objects_bef
-                options={'force': True, 'reverse': True, 'verbosity': None, 'quiet': False, 'difftype': 'sql', 'width': 75, 'changes-for': 'server1', 'skip_grants': True}
-                
-                list_of_obj1={}
-                for item in db_objects_bef:
-                    print "FRED ITEM : %s" % item[1][0]
-                    object1 = "%s.%s" % (db_name, item[1][0])
-                    print "FRED OBJECT1 : %s" % object1
-                    list_of_obj1[object1]=get_object_bef_mig(db_obj, object1, options)
-               
-                print "FRED VOICI LA LISTE : %s" % list_of_obj1 
+                options={'skip_data': True, 'force': True}
+                db_list = []
+                grp = re.match("(\w+)(?:\:(\w+))?","%s:%s_%s" % (db_name, tmp_prefix, db_name) )
+                db_entry = grp.groups()
+                db_list.append(db_entry)
+                source_values = parse_connection("root@localhost")
+                destination_values = parse_connection("root@localhost")
+                with capture() as stepback:
+                    dbcopy.copy_db(source_values, destination_values, db_list, options)
                 call_online_schema_change(db_name,version,"%s/%04d-up.mig" % (db_name, int(version)))
                 if verify_checksum(db_name,version,md5) is True:
                     print "Applied changes match the requested schema"
                 else:
                     print "Something didn't run as expected, db schema doesn't match !"
                     call_change_migration_status(db_name,version,'invalid checksum')
-                db_obj.init()
-                db_objects_aft = db_obj.objects
-                db_objects_aft.sort() 
-                in_both, in_db1, in_db2 = get_common_objects_mig(db_objects_bef,db_objects_aft)
-                in_both.sort()
-                for item in in_both:
-                    object1 = "%s.%s" % (db_name, item[1][0])
-                    object2 = "%s.%s" % (db_name, item[1][0])
-                    object1_create=list_of_obj1[object1]
-                    result = diff_objects_mig(db_obj, object1_create, object2, options)
+                    
+                options={'run_all_tests': True, 'reverse': True, 'verbosity': None, 
+                         'no_object_check': True, 'no_data': True, 'quiet': True, 
+                         'difftype': 'sql', 'width': 75, 'changes-for': 'server1', 'skip_grants': True}
+                with capture() as stepback:
+                    res = database_compare(source_values, destination_values, db_name , "%s_%s" % (tmp_prefix, db_name), options) 
+                query = "DROP DATABASE %s_%s" % (tmp_prefix, db_name)
+                #res = server.exec_query(query) 
+                str=stepback.getvalue().splitlines(True)
+                file_down = open("%s/%04d-down.mig" % (db_name, int(version)), 'a')
+                for line in str:
+                  if  line[0] not in ['#', '\n', '+', '-', '@' ]:
+                      file_down.write("%s" % line)
+                file_down.close()
 
         else:
             call_mysql_create_schema(db_name, "%s/0000-up.mig" % db_name)
