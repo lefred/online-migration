@@ -8,20 +8,18 @@ import re
 import glob
 import StringIO
 
-sys.path.append("./mysql")
-from database import Database
-from table import Table
-from server import get_server
-from subprocess import call
+#sys.path.append("./mysql")
+from mysql.utilities.common.database import Database
+from mysql.utilities.common.table import Table
+from mysql.utilities.common.server import get_server
 from mysql.utilities.common.options import parse_connection
 from mysql.utilities.command import dbcopy
 from mysql.utilities.command.dbcompare import database_compare
+from subprocess import call
 from contextlib import contextmanager
 
 #from dbcompare import get_common_objects_mig
 #from dbcompare import diff_objects_mig, get_object_bef_mig
-
-server=get_server("localhost","root@localhost:3306", False)
 database = "online_migration"
 table = "migration_sys"
 dbtable = database + "." + table
@@ -100,7 +98,7 @@ def check_init(db_name):
     res = server.exec_query(query)
     return (res is not None and len(res)>= 1)
          
-def call_online_schema_change(db_name, version, file_name):
+def call_online_schema_change(db_name, version, file_name, cmd='up'):
     f = open(file_name,"r")
     for line in iter(f): 
        call_change_migration_status(db_name,version,'running')
@@ -118,13 +116,15 @@ def call_online_schema_change(db_name, version, file_name):
                sys.exit(1)
            
            # create the undo for table creation here
-           file_down = open("%s/%04d-down.mig" % (db_name, int(version)), 'a')
-           if re.search('^create',query, re.IGNORECASE):
-               regex = re.compile("create\s+table\s+(\w+)",re.IGNORECASE)
-               r = regex.search(line)
-               table=r.group(1)
-               file_down.write("DROP TABLE %s;\n" % table)
-           file_down.close()
+           if cmd == "up":
+               file_down = open("%s/%04d-down.mig" % (db_name, int(version)), 'a')
+               if re.search('^create',query, re.IGNORECASE):
+                   query = re.sub("`"," ",query,0,re.IGNORECASE)
+                   regex = re.compile("create\s+table\s+(\w+)",re.IGNORECASE)
+                   r = regex.search(query)
+                   table=r.group(1)
+                   file_down.write("DROP TABLE %s;\n" % table)
+               file_down.close()
            
        else:
            cmd="./pt-online-schema-change h=localhost,u=root,D=\"%s\",t=%s --alter=\"%s\" --execute >>online_migration.log 2>&1" % (db_name, line_list[0], line_list[1])
@@ -136,7 +136,7 @@ def call_online_schema_change(db_name, version, file_name):
         
 def call_write_stmt_up(table,alter_stmt,file):
     alter_stmt = alter_stmt.replace('"','\"')
-    alter_stmt = re.sub("alter\s+table\s+"+table,"",alter_stmt,re.IGNORECASE)
+    alter_stmt = re.sub("alter\s+table\s+%s" % table,"",alter_stmt,1,re.IGNORECASE)
     alter_stmt = alter_stmt.replace('\n',' ')
     file.write("%s::%s\n" % (table, alter_stmt))
 
@@ -148,7 +148,12 @@ def call_change_migration_status(db_name, version, status):
     if int(last_version) == int(version):
         query = "UPDATE %s SET STATUS = '%s', apply_date=now() WHERE db = '%s' AND version = %s" % (dbtable, status, db_name, version) 
     else:
-       query = "INSERT INTO %s VALUES (0,'%s',%s,now(),now(),'ok')" % (dbtable, db_name, version) 
+        query = "SELECT version FROM %s WHERE `version` = %s and `db` = \"%s\";" % (dbtable, version, db_name)
+        res = server.exec_query(query)
+        if (res is None or len(res) < 1):
+            query = "INSERT INTO %s VALUES (0,'%s',%s,now(),now(),'ok')" % (dbtable, db_name, version) 
+        else:
+            query = "UPDATE %s SET STATUS = '%s', apply_date=now() WHERE db = '%s' AND version = %s" % (dbtable, status, db_name, version) 
     try: 
         res = server.exec_query(query)
     except Exception, e:
@@ -157,7 +162,7 @@ def call_change_migration_status(db_name, version, status):
         
 def call_pending_migration(db_name, last_ver):
     pend=0
-    metafiles = globallob.glob('%s/*.meta' % db_name)
+    metafiles = glob.glob('%s/*.meta' % db_name)
     metafiles.sort()
     for mig in metafiles:
         a=mig.split('/')
@@ -172,7 +177,7 @@ def call_new_migration_version(db_name):
     return int(last_version)+1
 
 def call_last_migration_version(db_name):
-    query = "SELECT max(version) FROM %s WHERE `db` = \"%s\";" % (dbtable, db_name)
+    query = "SELECT max(version) FROM %s WHERE status <> 'rollback' AND `db` = \"%s\";" % (dbtable, db_name)
     res = server.exec_query(query)
     if res is None:
         print "ERROR: there is no migration initilized for database %s !" % db_name
@@ -186,24 +191,8 @@ def call_add_up_in_db(db_name,version):
     except Exception, e:
         print "ERROR: %s !" % e 
         sys.exit(1)
-       
-def call_create_migration(db_name,file_name,comment=""): 
-    if not os.path.exists(file_name):        
-        print "\nERROR: %s doesn't exist !" % file_name
-        sys.exit(1)
-    db_obj = connect_db(server,db_name)
-    if not db_obj.exists():
-        print "\nERROR: database %s doesn't exist !" % db_name
-        sys.exit(1)
-    # find the migration version
-    last_version=call_last_migration_version(db_name)
-    # check first if there are pending migrations
-    pend=call_pending_migration(db_name, last_version)        
-    if pend > 0:
-        print "ERROR: you have %s pending migration(s) !" % pend
-        sys.exit(1)
-    version=call_new_migration_version(db_name)
-    file_up = open("%s/%04d-up.mig" % (db_name, int(version)), 'w')
+def call_create_migration_file(db_name, file_name, version, direction):
+    file_up = open("%s/%04d-%s.mig" % (db_name, int(version), direction), 'w')
     f = open(file_name,"r")
     alter_stmt=""
     other_stmt=""
@@ -218,12 +207,13 @@ def call_create_migration(db_name,file_name,comment=""):
               call_write_stmt_up("OM_IGNORE_TABLE", other_stmt, file_up)
               other_stmt=""
            alter_stmt=line
-           regex = re.compile("alter\s+table\s+(\w+)",re.IGNORECASE)
+           #regex = re.compile("alter\s+table\s+(\w+)",re.IGNORECASE)
+           regex = re.compile("alter\s+table\s+(.*)\s+",re.IGNORECASE)
            r = regex.search(line)
            table=r.group(1)
            
        else:
-           if re.search('^insert|^create|^drop',line, re.IGNORECASE):
+           if re.search('^insert|^create|^drop',line, re.IGNORECASE) and not re.search(' column | primary | key ',line, re.IGNORECASE):
                open_stmt=2
                if len(other_stmt) > 0:
                   call_write_stmt_up("OM_IGNORE_TABLE", other_stmt, file_up)
@@ -243,6 +233,24 @@ def call_create_migration(db_name,file_name,comment=""):
     else:
         call_write_stmt_up("OM_IGNORE_TABLE", other_stmt, file_up)
     file_up.close() 
+           
+def call_create_migration(db_name,file_name,comment=""): 
+    if not os.path.exists(file_name):        
+        print "\nERROR: %s doesn't exist !" % file_name
+        sys.exit(1)
+    db_obj = connect_db(server,db_name)
+    if not db_obj.exists():
+        print "\nERROR: database %s doesn't exist !" % db_name
+        sys.exit(1)
+    # find the migration version
+    last_version=call_last_migration_version(db_name)
+    # check first if there are pending migrations
+    pend=call_pending_migration(db_name, last_version)        
+    if pend > 0:
+        print "ERROR: you have %s pending migration(s) !" % pend
+        sys.exit(1)
+    version=call_new_migration_version(db_name)
+    call_create_migration_file(db_name, file_name, version, "up")
     call_add_up_in_db(db_name,version)
     call_online_schema_change(db_name,version,"%s/%04d-up.mig" % (db_name, int(version)))
     print "\nmigration %04d created successfully !" % int(version)
@@ -333,7 +341,7 @@ def call_status_db(db_name):
             (ver,md5,comment)=read_meta(db_name, records[0])
             status=records[2]
             if ver == last_ver:
-                if not verify_checksum(db_name,ver,md5):
+                if not verify_checksum(db_name,ver,md5) and status != "rollback":
                     status="checksum problem"
             ver="%04d" % int(ver)    
             print "  | %7s | %s | %16s | %22s |" % (ver, records[1], status, comment[:22])
@@ -390,6 +398,8 @@ if len(sys.argv) < 2:
     print "ERROR: a command is needed"
     sys.exit(1)
 else:
+    with capture() as nowhere:
+        server=get_server("localhost","root@localhost:3306", False)
     if sys.argv[1]  == 'init_sysdb':
         call_init_sysdb()
     elif sys.argv[1] == 'init':
@@ -418,6 +428,18 @@ else:
         db_name=(sys.argv[2])
         checksum=call_create_checksum(db_name, "0")
         print "%s's current schema cheksum = %s" % (db_name, checksum) 
+    elif sys.argv[1] == 'down':
+        check_arg(1)
+        check_sys_init()
+        db_name=(sys.argv[2])
+        last_version=call_last_migration_version(db_name)
+        if last_version is not None and int(last_version) > 0:
+            print "rollback from %04d to %04d" % (int(last_version), int(last_version)-1)
+            call_online_schema_change(db_name,last_version,"%s/%04d-down.mig" % (db_name, int(last_version)),'down')
+            call_change_migration_status(db_name,last_version,'rollback')
+        else:
+            print "ERROR: impossible to rollback as nothing was migrated yet !"
+            sys.exit(1)
     elif sys.argv[1] == 'up':
         check_arg(1)
         check_sys_init()
@@ -454,18 +476,36 @@ else:
                     call_change_migration_status(db_name,version,'invalid checksum')
                     
                 options={'run_all_tests': True, 'reverse': True, 'verbosity': None, 
-                         'no_object_check': True, 'no_data': True, 'quiet': True, 
+                         'no_object_check': False, 'no_data': True, 'quiet': True, 
                          'difftype': 'sql', 'width': 75, 'changes-for': 'server1', 'skip_grants': True}
                 with capture() as stepback:
                     res = database_compare(source_values, destination_values, db_name , "%s_%s" % (tmp_prefix, db_name), options) 
-                query = "DROP DATABASE %s_%s" % (tmp_prefix, db_name)
-                #res = server.exec_query(query) 
                 str=stepback.getvalue().splitlines(True)
-                file_down = open("%s/%04d-down.mig" % (db_name, int(version)), 'a')
+                to_add=0
+                file_down = open("%s/%04d-down.tmp" % (db_name, int(version)), 'a')
                 for line in str:
                   if  line[0] not in ['#', '\n', '+', '-', '@' ]:
-                      file_down.write("%s" % line)
+                      line = re.sub(" %s\." % db_name," ",line,1,re.IGNORECASE)
+                      file_down.write("%s\n" % line.strip())
+                  elif re.match("# WARNING: Objects in",line):
+                      if re.match("# WARNING: Objects in \w+\.tmp_online_mig_", line):
+                          to_add=2
+                      else:
+                          to_add=1
+                  else: 
+                      grp = re.match("#\s+TABLE\: (\w+)", line )
+                      if grp: 
+                          if to_add == 2:
+                              query = "SHOW CREATE TABLE tmp_online_mig_%s.%s;" % (db_name, grp.group(1))
+                              res = server.exec_query(query) 
+                              file_down.write("%s\n" % res[0][1]) 
+                          elif to_add == 1:
+                              file_down.write("DROP TABLE %s;\n" % grp.group(1))
                 file_down.close()
+                call_create_migration_file(db_name, "%s/%04d-down.tmp" % (db_name, int(version)), version, "down")
+                query = "DROP DATABASE %s_%s" % (tmp_prefix, db_name)
+                res = server.exec_query(query) 
+                os.remove("%s/%04d-down.tmp" % (db_name, int(version))) 
 
         else:
             call_mysql_create_schema(db_name, "%s/0000-up.mig" % db_name)
