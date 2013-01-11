@@ -15,6 +15,7 @@ from mysql.utilities.common.server import get_server
 from mysql.utilities.common.options import parse_connection
 from mysql.utilities.command import dbcopy
 from mysql.utilities.command.dbcompare import database_compare
+from mysql.utilities.command.dbexport import export_databases
 from subprocess import call
 from contextlib import contextmanager
 
@@ -60,7 +61,7 @@ def call_init_sysdb():
 # check that a db was entered
 def check_arg(num=1):
    if len(sys.argv) <= num+1:
-       print "\nERROR: %i arguments are required with command %s !" % (num, sys.argv[1])
+       print "ERROR: %i argument(s) is/are required with command %s !" % (num, sys.argv[1])
        sys.exit(1) 
 # check if the system table are created     
 def check_sys_init():
@@ -160,7 +161,7 @@ def call_change_migration_status(db_name, version, status):
         print "ERROR: %s !" % e 
         sys.exit(1)
         
-def call_pending_migration(db_name, last_ver):
+def call_pending_migration(db_name, lambdast_ver):
     pend=0
     metafiles = glob.glob('%s/*.meta' % db_name)
     metafiles.sort()
@@ -171,8 +172,35 @@ def call_pending_migration(db_name, last_ver):
         if int(c[0]) > int(last_ver):
             pend=pend+1
     return pend
-                
+
+def call_check_version_pending(db_name, version): 
+    last_ver=call_last_migration_version(db_name)
+    metafiles = glob.glob('%s/%04d-up.meta' % (db_name, version))
+    metafiles.sort()
+    for mig in metafiles:
+        a=mig.split('/')
+        b=a[1].split('.') 
+        c=b[0].split('-')
+        if int(c[0]) > int(last_ver):
+            return True 
+    return False
+
+def call_applied_migration(db_name):
+    query = "SELECT version, apply_date, status FROM %s where status not like 'rollback' AND db = '%s';" % (dbtable, db_name)
+    res = server.exec_query(query)
+    return len(res)-1
+    
+def call_check_version_applied(db_name, version):
+    query = "SELECT version, apply_date, status FROM %s where version = %s AND status not like 'rollback' AND db = '%s';" % (dbtable, version, db_name)
+    res = server.exec_query(query)
+    if len(res) > 0:
+        return True
+    else:
+        return False
+                    
 def call_new_migration_version(db_name):
+    query = "SELECT version, apply_date, status FROM %s where db = '%s';" % (dbtable, db_name)
+    res = server.exec_query(query)
     last_version=call_last_migration_version(db_name)
     return int(last_version)+1
 
@@ -365,6 +393,11 @@ def verify_checksum(db_name,version,md5):
     else: 
         return False
     
+def call_print_diff(db_name):
+    last_version=call_last_migration_version(db_name)
+    (ver,md5,comment)=read_meta(db_name, int(last_version))
+    if verify_checksum(db_name,last_version,md5) is False:
+        print "NOTICE: schema of %s doesn't have expected checksum (%s)" % (db_name, md5)
 
 def read_meta(db_name, version):
     f=open("%s/%04d-up.meta" % (db_name, int(version)), 'r')
@@ -391,7 +424,84 @@ def capture():
     try:
         yield sys.stdout
     finally:
-        sys.stdout = old_stdout    
+        sys.stdout = old_stdout   
+        
+def call_create_schema_img(db_name):         
+    print "TODO" 
+    server_values = parse_connection("root@localhost")
+    options={'skip_data': True, 'skip_grants': True, 'skip_create': True}
+    db_list = []
+    db_list.append(db_name)
+    export_databases(server_values, db_list, options)
+        
+def call_migrate_down(db_name, last_version):
+    print "rollback from %04d to %04d" % (int(last_version), int(last_version)-1)
+    call_online_schema_change(db_name,last_version,"%s/%04d-down.mig" % (db_name, int(last_version)),'down')
+    call_change_migration_status(db_name,last_version,'rollback')
+    
+def call_migrate_up(db_name, last_verion):
+    (ver,md5,comment)=read_meta(db_name, int(last_version))
+    if verify_checksum(db_name,last_version,md5) is False:
+        print "Warning: the current schema doesn't match the last applied migration"
+    version=call_new_migration_version(db_name)
+    if not os.path.exists("%s/%04d-up.mig" % (db_name, int(version))):        
+        print "No migration available"
+    else:
+        print "Preparing migration to version %04d" % int(version)
+        if os.path.exists("%s/%04d-down.mig" % (db_name, int(version))):        
+            os.remove("%s/%04d-down.mig" % (db_name, int(version))) 
+            
+        (ver,md5,comment)=read_meta(db_name, int(version))
+        
+        options={'skip_data': True, 'force': True}
+        db_list = []
+        grp = re.match("(\w+)(?:\:(\w+))?","%s:%s_%s" % (db_name, tmp_prefix, db_name) )
+        db_entry = grp.groups()
+        db_list.append(db_entry)
+        source_values = parse_connection("root@localhost")
+        destination_values = parse_connection("root@localhost")
+        with capture() as stepback:
+            dbcopy.copy_db(source_values, destination_values, db_list, options)
+        call_online_schema_change(db_name,version,"%s/%04d-up.mig" % (db_name, int(version)))
+        if verify_checksum(db_name,version,md5) is True:
+            print "Applied changes match the requested schema"
+        else:
+            print "Something didn't run as expected, db schema doesn't match !"
+            call_change_migration_status(db_name,version,'invalid checksum')
+            
+        options={'run_all_tests': True, 'reverse': True, 'verbosity': None, 
+                 'no_object_check': False, 'no_data': True, 'quiet': True, 
+                 'difftype': 'sql', 'width': 75, 'changes-for': 'server1', 'skip_grants': True}
+        with capture() as stepback:
+            res = database_compare(source_values, destination_values, db_name , "%s_%s" % (tmp_prefix, db_name), options) 
+        str=stepback.getvalue().splitlines(True)
+        to_add=0
+        file_down = open("%s/%04d-down.tmp" % (db_name, int(version)), 'a')
+        for line in str:
+          if  line[0] not in ['#', '\n', '+', '-', '@' ]:
+              line = re.sub(" %s\." % db_name," ",line,1,re.IGNORECASE)
+              file_down.write("%s\n" % line.strip())
+          elif re.match("# WARNING: Objects in",line):
+              if re.match("# WARNING: Objects in \w+\.tmp_online_mig_", line):
+                  to_add=2
+              else:
+                  to_add=1
+          else: 
+              grp = re.match("#\s+TABLE\: (\w+)", line )
+              if grp: 
+                  if to_add == 2:
+                      query = "SHOW CREATE TABLE tmp_online_mig_%s.%s;" % (db_name, grp.group(1))
+                      res = server.exec_query(query) 
+                      file_down.write("%s\n" % res[0][1]) 
+                  elif to_add == 1:
+                      file_down.write("DROP TABLE %s;\n" % grp.group(1))
+        file_down.close()
+        call_create_migration_file(db_name, "%s/%04d-down.tmp" % (db_name, int(version)), version, "down")
+        query = "DROP DATABASE %s_%s" % (tmp_prefix, db_name)
+        res = server.exec_query(query) 
+        os.remove("%s/%04d-down.tmp" % (db_name, int(version))) 
+        call_create_schema_img(db_name)
+
 
 # Main program
 if len(sys.argv) < 2:
@@ -427,86 +537,74 @@ else:
         check_sys_init()
         db_name=(sys.argv[2])
         checksum=call_create_checksum(db_name, "0")
-        print "%s's current schema cheksum = %s" % (db_name, checksum) 
+        print "%s's current schema checksum = %s" % (db_name, checksum) 
     elif sys.argv[1] == 'down':
         check_arg(1)
         check_sys_init()
         db_name=(sys.argv[2])
         last_version=call_last_migration_version(db_name)
-        if last_version is not None and int(last_version) > 0:
-            print "rollback from %04d to %04d" % (int(last_version), int(last_version)-1)
-            call_online_schema_change(db_name,last_version,"%s/%04d-down.mig" % (db_name, int(last_version)),'down')
-            call_change_migration_status(db_name,last_version,'rollback')
+        if len(sys.argv) == 4 and re.search("\d", sys.argv[3]):
+            print "NOTICE: you want to migrate down %d version(s)" % int(sys.argv[3])
+            tot=0
+            tot_app=call_applied_migration(db_name)
+            if tot_app >= int(sys.argv[3]): 
+                while tot < int(sys.argv[3]):                                                                                  
+                    last_version=call_last_migration_version(db_name)   
+                    call_migrate_down(db_name, last_version)
+                    tot+=1
+            else:
+                print"ERROR: only %d applied migration(s) available !" % tot_app
+                sys.exit(1)
+        elif len(sys.argv) == 5:
+            if sys.argv[3] == 'to' and re.search("\d", sys.argv[4]):
+                print "NOTICE: you want to migrate down to version %04d" % int(sys.argv[4])
+                if call_check_version_applied(db_name, int(sys.argv[4])):
+                    print "NOTICE: ok this version was applied"
+                    while int(last_version) > int(sys.argv[4]):
+                        call_migrate_down(db_name, last_version)
+                        last_version=call_last_migration_version(db_name)   
         else:
-            print "ERROR: impossible to rollback as nothing was migrated yet !"
-            sys.exit(1)
+            if last_version is not None and int(last_version) > 0:
+                call_migrate_down(db_name, last_version)
+            else:
+                print "ERROR: impossible to rollback as nothing was migrated yet !"
+                sys.exit(1)
     elif sys.argv[1] == 'up':
         check_arg(1)
         check_sys_init()
         db_name=(sys.argv[2])
-        last_version=call_last_migration_version(db_name)
-        if last_version is not None:
-            (ver,md5,comment)=read_meta(db_name, int(last_version))
-            if verify_checksum(db_name,last_version,md5) is False:
-                print "Warning: the current schema doesn't match the last applied migration"
-            version=call_new_migration_version(db_name)
-            if not os.path.exists("%s/%04d-up.mig" % (db_name, int(version))):        
-                print "\nNo migration available"
+        last_version=call_last_migration_version(db_name)   
+        if len(sys.argv) == 4 and re.search("\d", sys.argv[3]):
+            print "NOTICE: you want to migrate up %d version(s)" % int(sys.argv[3])
+            tot=0
+            tot_pend=call_pending_migration(db_name, last_version)
+            if tot_pend >= int(sys.argv[3]): 
+                while tot < int(sys.argv[3]):                                                                                  
+                    last_version=call_last_migration_version(db_name)   
+                    call_migrate_up(db_name, last_version)
+                    tot+=1
             else:
-                print "Preparing migration to version %04d" % int(version)
-                if os.path.exists("%s/%04d-down.mig" % (db_name, int(version))):        
-                    os.remove("%s/%04d-down.mig" % (db_name, int(version))) 
-                    
-                (ver,md5,comment)=read_meta(db_name, int(version))
-                
-                options={'skip_data': True, 'force': True}
-                db_list = []
-                grp = re.match("(\w+)(?:\:(\w+))?","%s:%s_%s" % (db_name, tmp_prefix, db_name) )
-                db_entry = grp.groups()
-                db_list.append(db_entry)
-                source_values = parse_connection("root@localhost")
-                destination_values = parse_connection("root@localhost")
-                with capture() as stepback:
-                    dbcopy.copy_db(source_values, destination_values, db_list, options)
-                call_online_schema_change(db_name,version,"%s/%04d-up.mig" % (db_name, int(version)))
-                if verify_checksum(db_name,version,md5) is True:
-                    print "Applied changes match the requested schema"
+                print"ERROR: only %d pending migration(s) available !" % tot_pend
+                sys.exit(1)
+        elif len(sys.argv) == 5:
+            if sys.argv[3] == 'to' and re.search("\d", sys.argv[4]):
+                print "NOTICE: you want to migrate up to version %04d" % int(sys.argv[4])
+                if int(sys.argv[4]) == 0:
+                    call_mysql_create_schema(db_name, "%s/0000-up.mig" % db_name)
                 else:
-                    print "Something didn't run as expected, db schema doesn't match !"
-                    call_change_migration_status(db_name,version,'invalid checksum')
-                    
-                options={'run_all_tests': True, 'reverse': True, 'verbosity': None, 
-                         'no_object_check': False, 'no_data': True, 'quiet': True, 
-                         'difftype': 'sql', 'width': 75, 'changes-for': 'server1', 'skip_grants': True}
-                with capture() as stepback:
-                    res = database_compare(source_values, destination_values, db_name , "%s_%s" % (tmp_prefix, db_name), options) 
-                str=stepback.getvalue().splitlines(True)
-                to_add=0
-                file_down = open("%s/%04d-down.tmp" % (db_name, int(version)), 'a')
-                for line in str:
-                  if  line[0] not in ['#', '\n', '+', '-', '@' ]:
-                      line = re.sub(" %s\." % db_name," ",line,1,re.IGNORECASE)
-                      file_down.write("%s\n" % line.strip())
-                  elif re.match("# WARNING: Objects in",line):
-                      if re.match("# WARNING: Objects in \w+\.tmp_online_mig_", line):
-                          to_add=2
-                      else:
-                          to_add=1
-                  else: 
-                      grp = re.match("#\s+TABLE\: (\w+)", line )
-                      if grp: 
-                          if to_add == 2:
-                              query = "SHOW CREATE TABLE tmp_online_mig_%s.%s;" % (db_name, grp.group(1))
-                              res = server.exec_query(query) 
-                              file_down.write("%s\n" % res[0][1]) 
-                          elif to_add == 1:
-                              file_down.write("DROP TABLE %s;\n" % grp.group(1))
-                file_down.close()
-                call_create_migration_file(db_name, "%s/%04d-down.tmp" % (db_name, int(version)), version, "down")
-                query = "DROP DATABASE %s_%s" % (tmp_prefix, db_name)
-                res = server.exec_query(query) 
-                os.remove("%s/%04d-down.tmp" % (db_name, int(version))) 
-
+                    if call_check_version_pending(db_name, int(sys.argv[4])):
+                        print "NOTICE: ok this version is pending"
+                        while int(last_version) < int(sys.argv[4]):
+                            call_migrate_up(db_name, last_version)
+                            last_version=call_last_migration_version(db_name)   
         else:
-            call_mysql_create_schema(db_name, "%s/0000-up.mig" % db_name)
+            if last_version is not None:
+                call_migrate_up(db_name, last_version)
+            else:
+                call_mysql_create_schema(db_name, "%s/0000-up.mig" % db_name)
+    elif sys.argv[1] == 'diff':
+        check_arg(1)
+        check_sys_init()
+        db_name=(sys.argv[2])
+        call_print_diff(db_name)
     
