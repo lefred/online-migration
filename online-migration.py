@@ -161,7 +161,7 @@ def call_change_migration_status(db_name, version, status):
         print "ERROR: %s !" % e 
         sys.exit(1)
         
-def call_pending_migration(db_name, lambdast_ver):
+def call_pending_migration(db_name, last_ver):
     pend=0
     metafiles = glob.glob('%s/*.meta' % db_name)
     metafiles.sort()
@@ -219,6 +219,7 @@ def call_add_up_in_db(db_name,version):
     except Exception, e:
         print "ERROR: %s !" % e 
         sys.exit(1)
+        
 def call_create_migration_file(db_name, file_name, version, direction):
     file_up = open("%s/%04d-%s.mig" % (db_name, int(version), direction), 'w')
     f = open(file_name,"r")
@@ -286,16 +287,11 @@ def call_create_migration(db_name,file_name,comment=""):
     create_meta(db_name,version,md5check,comment)
     
 def call_create_checksum(db_name, version):
-    file_desc_tmp = open("%s/%04d-up.tmp" % (db_name, int(version)), 'w')
-    db_obj = connect_db(server, db_name)
-    table_names = [obj[0] for obj in db_obj.get_db_objects('TABLE')]
-    for tblname in table_names:
-        query = "DESC %s.%s;" % (db_name, tblname)
-        res = server.exec_query(query)
-        file_desc_tmp.write("%s\n" % ' '.join(str(x) for x in res)) 
-    file_desc_tmp.close() 
-    md5check = calculate_md5("%s/%04d-up.tmp" % (db_name, int(version)))
-    os.remove("%s/%04d-up.tmp" % (db_name, int(version))) 
+    version=call_last_migration_version(db_name)
+    tmp_file="%s/%04d.schema_tmp" % (db_name, int(version))
+    call_create_schema_img(db_name, tmp_file)
+    md5check=calculate_md5(tmp_file)
+    os.remove(tmp_file) 
     return md5check
         
 # function to initiate the first migration      
@@ -365,7 +361,6 @@ def call_status_db(db_name):
         # before displaying the status, let's verify the checksum
         last_ver=call_last_migration_version(db_name)
         for records in res: 
-            # TODO: read meta data for each version to add the coment
             (ver,md5,comment)=read_meta(db_name, records[0])
             status=records[2]
             if ver == last_ver:
@@ -392,12 +387,61 @@ def verify_checksum(db_name,version,md5):
         return True
     else: 
         return False
+
+def call_get_diff(db_name,version):
+    file_schema="%s/%04d-schema.img" % (db_name, int(version))
+    file_schema_swp="%s/%04d-schema.swp" % (db_name, int(version))
+    tmp_db="tmp_online_mig_%s" % (db_name)
+    query = "CREATE DATABASE %s;" % tmp_db 
+    res = server.exec_query(query) 
+    f=open(file_schema, 'r')
+    f_swp=open(file_schema_swp, 'w')
+    f_swp.write("USE %s\n" % tmp_db)
+    buff=""
+    for line in f.readlines():
+        if re.search(';$',line, re.IGNORECASE):
+            buff = buff + line
+            f_swp.write(buff)
+            buff = ""
+        else:
+            buff = buff + line.strip()
+    f.close()
+    f_swp.close()
+    options={'multi': True}
+    f_swp=open(file_schema_swp, 'r')
+    for line in f_swp.readlines():
+        res = server.exec_query(line, options) 
+        
+    f_swp.close()
+    os.remove(file_schema_swp) 
+    options={'run_all_tests': True, 'reverse': False, 'verbosity': None, 
+             'no_object_check': False, 'no_data': True, 'quiet': True, 
+             'difftype': 'context', 'width': 75, 'changes-for': 'server1', 'skip_grants': True}
+    source_values = parse_connection("root@localhost")
+    destination_values = parse_connection("root@localhost")
+    with capture() as stepback:
+        res = database_compare(source_values, destination_values, db_name , tmp_db, options) 
+    for line in stepback.getvalue().splitlines(True):
+        if not re.search('^.CREATE DATABASE',line) and not re.search('^--- ', line) and not re.search('^\*\*\*', line) and not re.search("^$", line) and not re.search("^\!", line):
+            if not re.search('^#',line) or re.search('^# WARNING: ', line) or re.search('^#  \s+', line):
+                if re.search("in server1.%s but not in " % db_name, line):
+                    print "# Element(s) present that shouldn't be: "
+                elif re.search("in server1.tmp_online_mig_%s but not in " % db_name, line):   
+                    print "# Element(s) absent that should be present: "
+                else:
+                    print line.strip()
+    query = "DROP DATABASE %s" % tmp_db
+    res = server.exec_query(query) 
+    
     
 def call_print_diff(db_name):
     last_version=call_last_migration_version(db_name)
     (ver,md5,comment)=read_meta(db_name, int(last_version))
     if verify_checksum(db_name,last_version,md5) is False:
-        print "NOTICE: schema of %s doesn't have expected checksum (%s)" % (db_name, md5)
+        print "Warning: schema of %s doesn't have expected checksum (%s)" % (db_name, md5)
+        call_get_diff(db_name, last_version)
+    else:
+        print "%s matches the expected schema for version %04d" % (db_name, int(last_version))
 
 def read_meta(db_name, version):
     f=open("%s/%04d-up.meta" % (db_name, int(version)), 'r')
@@ -407,7 +451,7 @@ def read_meta(db_name, version):
     return(ver.rstrip(),md5.rstrip(),comment.rstrip()) 
 
 def call_mysql_create_schema(db_name, file_name):
-    f = open(file_name,"r")
+    #f = open(file_name,"r")
     call_change_migration_status(db_name,0,'running')
     cmd="mysql -u root < %s >>online_migration.log 2>&1" % file_name
     if call(cmd, shell=True) == 0:
@@ -425,14 +469,26 @@ def capture():
         yield sys.stdout
     finally:
         sys.stdout = old_stdout   
-        
-def call_create_schema_img(db_name):         
-    print "TODO" 
-    server_values = parse_connection("root@localhost")
-    options={'skip_data': True, 'skip_grants': True, 'skip_create': True}
-    db_list = []
-    db_list.append(db_name)
-    export_databases(server_values, db_list, options)
+
+def call_get_schema_img(db_name):
+    with capture() as dbschema:
+        server_values = parse_connection("root@localhost")
+        options={'skip_data': True, 'skip_grants': True, 'skip_create': True, 'rpl_mode': None, 'quiet': True}
+        db_list = []
+        db_list.append(db_name)
+        export_databases(server_values, db_list, options)
+    db_schema=dbschema.getvalue().splitlines(True)
+    return db_schema
+            
+def call_create_schema_img(db_name, filename):         
+    dbschema=call_get_schema_img(db_name)
+    file_schema = open(filename, 'w')
+    i=0
+    for line in dbschema:
+        if i > 0 :
+            file_schema.write("%s" % line)
+        i=+1
+    file_schema.close()
         
 def call_migrate_down(db_name, last_version):
     print "rollback from %04d to %04d" % (int(last_version), int(last_version)-1)
@@ -496,11 +552,13 @@ def call_migrate_up(db_name, last_verion):
                   elif to_add == 1:
                       file_down.write("DROP TABLE %s;\n" % grp.group(1))
         file_down.close()
-        call_create_migration_file(db_name, "%s/%04d-down.tmp" % (db_name, int(version)), version, "down")
+        file_down_tmp="%s/%04d-down.tmp" % (db_name, int(version))
+        call_create_migration_file(db_name, file_down_tmp, version, "down")
         query = "DROP DATABASE %s_%s" % (tmp_prefix, db_name)
         res = server.exec_query(query) 
-        os.remove("%s/%04d-down.tmp" % (db_name, int(version))) 
-        call_create_schema_img(db_name)
+        os.remove(file_down_tmp) 
+        file_schema="%s/%04d-schema.img" % (db_name, int(version))
+        call_create_schema_img(db_name, file_schema)
 
 
 # Main program
