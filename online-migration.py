@@ -507,7 +507,7 @@ def call_create_schema_img(db_name, filename):
     for line in dbschema:
         if i > 0:
             file_schema.write("%s" % line)
-        i=+1
+        i += 1
     file_schema.close()
 
 
@@ -557,26 +557,26 @@ def call_migrate_up(db_name, last_verion):
             if line[0] not in ['#', '\n', '+', '-', '@']:
                 line = re.sub(" %s\." % db_name, " ", line, 1, re.IGNORECASE)
                 file_down.write("%s\n" % line.strip())
-            elif re.match("# WARNING: Objects in",line):
+            elif re.match("# WARNING: Objects in", line):
                 if re.match("# WARNING: Objects in \w+\.tmp_online_mig_", line):
                     to_add = 2
                 else:
                     to_add = 1
-            else: 
-                grp = re.match("#\s+TABLE\: (\w+)", line )
-                if grp: 
+            else:
+                grp = re.match("#\s+TABLE\: (\w+)", line)
+                if grp:
                     if to_add == 2:
                         query = "SHOW CREATE TABLE tmp_online_mig_%s.%s;" % (db_name, grp.group(1))
-                        res = server.exec_query(query) 
-                        file_down.write("%s\n" % res[0][1]) 
+                        res = server.exec_query(query)
+                        file_down.write("%s\n" % res[0][1])
                     elif to_add == 1:
                         file_down.write("DROP TABLE %s;\n" % grp.group(1))
         file_down.close()
         file_down_tmp = "%s/%04d-down.tmp" % (db_name, int(version))
         call_create_migration_file(db_name, file_down_tmp, version, "down")
         query = "DROP DATABASE %s_%s" % (tmp_prefix, db_name)
-        res = server.exec_query(query) 
-        os.remove(file_down_tmp) 
+        res = server.exec_query(query)
+        os.remove(file_down_tmp)
         file_schema = "%s/%04d-schema.img" % (db_name, int(version))
         call_create_schema_img(db_name, file_schema)
 
@@ -587,8 +587,8 @@ if len(sys.argv) < 2:
     sys.exit(1)
 else:
     with capture() as nowhere:
-        server = get_server("localhost","root@localhost:3306", False)
-    if sys.argv[1]  == 'init_sysdb':
+        server = get_server("localhost", "root@localhost:3306", False)
+    if sys.argv[1] == 'init_sysdb':
         call_init_sysdb()
     elif sys.argv[1] == 'init':
         check_arg()
@@ -598,7 +598,7 @@ else:
         check_arg(2)
         check_sys_init()
         if len(sys.argv) > 4:
-            comment=sys.argv[4]
+            comment = sys.argv[4]
         else:
             comment = "none"
         call_create_migration(sys.argv[2], sys.argv[3], comment)
@@ -615,7 +615,7 @@ else:
         check_sys_init()
         db_name = (sys.argv[2])
         checksum = call_create_checksum(db_name, "0")
-        print "%s's current schema checksum = %s" % (db_name, checksum) 
+        print "%s's current schema checksum = %s" % (db_name, checksum)
     elif sys.argv[1] == 'down':
         check_arg(1)
         check_sys_init()
@@ -625,9 +625,9 @@ else:
             print "NOTICE: you want to migrate down %d version(s)" % int(sys.argv[3])
             tot = 0
             tot_app = call_applied_migration(db_name)
-            if tot_app >= int(sys.argv[3]): 
-                while tot < int(sys.argv[3]):                                                                                  
-                    last_version = call_last_migration_version(db_name)   
+            if tot_app >= int(sys.argv[3]):
+                while tot < int(sys.argv[3]):
+                    last_version = call_last_migration_version(db_name)
                     call_migrate_down(db_name, last_version)
                     tot += 1
             else:
@@ -640,7 +640,7 @@ else:
                     print "NOTICE: ok this version was applied"
                     while int(last_version) > int(sys.argv[4]):
                         call_migrate_down(db_name, last_version)
-                        last_version = call_last_migration_version(db_name)   
+                        last_version = call_last_migration_version(db_name)
         else:
             if last_version is not None and int(last_version) > 0:
                 call_migrate_down(db_name, last_version)
@@ -651,14 +651,14 @@ else:
         check_arg(1)
         check_sys_init()
         db_name = (sys.argv[2])
-        last_version = call_last_migration_version(db_name)   
+        last_version = call_last_migration_version(db_name)
         if len(sys.argv) == 4 and re.search("\d", sys.argv[3]):
             print "NOTICE: you want to migrate up %d version(s)" % int(sys.argv[3])
             tot = 0
             tot_pend = call_pending_migration(db_name, last_version)
-            if tot_pend >= int(sys.argv[3]): 
-                while tot < int(sys.argv[3]):                                                                                  
-                    last_version = call_last_migration_version(db_name)   
+            if tot_pend >= int(sys.argv[3]):
+                while tot < int(sys.argv[3]):
+                    last_version = call_last_migration_version(db_name)
                     call_migrate_up(db_name, last_version)
                     tot += 1
             else:
@@ -674,7 +674,7 @@ else:
                         print "NOTICE: ok this version is pending"
                         while int(last_version) < int(sys.argv[4]):
                             call_migrate_up(db_name, last_version)
-                            last_version = call_last_migration_version(db_name)   
+                            last_version = call_last_migration_version(db_name)
         else:
             if last_version is not None:
                 call_migrate_up(db_name, last_version)
@@ -685,4 +685,3 @@ else:
         check_sys_init()
         db_name = (sys.argv[2])
         call_print_diff(db_name)
-    
