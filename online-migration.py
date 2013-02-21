@@ -26,6 +26,13 @@ table = "migration_sys"
 dbtable = database + "." + table
 tmp_prefix = "tmp_online_mig"
 
+server_host = '127.0.0.1'
+server_port = '13611'
+server_user = 'msandbox'
+server_password = 'msandbox'
+
+server_connection = "%s:%s@%s:%s" % (server_user, server_password, server_host, server_port)
+
 
 def connect_db(server, database):
 # function to connect to MySQL
@@ -113,6 +120,7 @@ def call_online_schema_change(db_name, version, file_name, cmd='up'):
         call_change_migration_status(db_name, version, 'running')
         line_list = line.split("::")
         if line_list[0] == "OM_IGNORE_TABLE":
+ 	    server.disable_foreign_key_checks()
             query = line_list[1]
             query_options = {
                 'params': (db_name)
@@ -133,8 +141,9 @@ def call_online_schema_change(db_name, version, file_name, cmd='up'):
                     table = r.group(1)
                     file_down.write("DROP TABLE %s;\n" % table)
                 file_down.close()
+	    server.disable_foreign_key_checks(disable=False)
         else:
-            cmd = "./pt-online-schema-change h=localhost,u=root,D=\"%s\",t=%s --alter=\"%s\" --execute >>online_migration.log 2>&1" % (db_name, line_list[0], line_list[1])
+            cmd = "./pt-online-schema-change h=%s,P=%s,u=%s,p=%s,D=\"%s\",t=%s --alter=\"%s\" --execute >>online_migration.log 2>&1" % (server_host, server_port, server_user, server_password, db_name, line_list[0], line_list[1])
             #print cmd
             if call(cmd, shell=True) != 0:
                 print "ERROR: problem while running :\n   %s" % cmd
@@ -431,8 +440,8 @@ def call_get_diff(db_name, version):
                'no_object_check': False, 'no_data': True, 'quiet': True,
                'difftype': 'context', 'width': 75, 'changes-for': 'server1',
                'skip_grants': True}
-    source_values = parse_connection("root@localhost")
-    destination_values = parse_connection("root@localhost")
+    source_values = parse_connection(server_connection)
+    destination_values = parse_connection(server_connection)
     with capture() as stepback:
         res = database_compare(source_values, destination_values, db_name, tmp_db, options)
     for line in stepback.getvalue().splitlines(True):
@@ -469,7 +478,7 @@ def read_meta(db_name, version):
 def call_mysql_create_schema(db_name, file_name):
     #f = open(file_name,"r")
     call_change_migration_status(db_name, 0, 'running')
-    cmd = "mysql -u root < %s >>online_migration.log 2>&1" % file_name
+    cmd = "mysql -u %s -p%s -h %s -P %s < %s >>online_migration.log 2>&1" % (server_user, server_password, server_host, server_port, file_name)
     if call(cmd, shell=True) == 0:
         print "Schema creation run successfully"
     else:
@@ -490,7 +499,7 @@ def capture():
 
 def call_get_schema_img(db_name):
     with capture() as dbschema:
-        server_values = parse_connection("root@localhost")
+        server_values = parse_connection(server_connection)
         options = {'skip_data': True, 'skip_grants': True, 'skip_create': True,
                    'rpl_mode': None, 'quiet': True}
         db_list = []
@@ -534,8 +543,8 @@ def call_migrate_up(db_name, last_verion):
         grp = re.match("(\w+)(?:\:(\w+))?", "%s:%s_%s" % (db_name, tmp_prefix, db_name))
         db_entry = grp.groups()
         db_list.append(db_entry)
-        source_values = parse_connection("root@localhost")
-        destination_values = parse_connection("root@localhost")
+        source_values = parse_connection(server_connection)
+        destination_values = parse_connection(server_connection)
         with capture() as stepback:
             dbcopy.copy_db(source_values, destination_values, db_list, options)
         call_online_schema_change(db_name, version, "%s/%04d-up.mig" % (db_name, int(version)))
@@ -587,7 +596,7 @@ if len(sys.argv) < 2:
     sys.exit(1)
 else:
     with capture() as nowhere:
-        server = get_server("localhost", "root@localhost:3306", False)
+        server = get_server("localhost", server_connection, False)
     if sys.argv[1] == 'init_sysdb':
         call_init_sysdb()
     elif sys.argv[1] == 'init':
