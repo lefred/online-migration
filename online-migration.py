@@ -47,12 +47,12 @@ def call_init_sysdb():
 # online-migration
     db_obj = connect_db(server, database)
     if not db_obj.exists():
-        print "\nThe database does not exist: {0}".format(database)
+        print "The database does not exist: {0}".format(database)
         print "Creating the database: {0}".format(database)
         db_obj.create(server, database)
     tbl_obj = Table(server, dbtable)
     if not tbl_obj.exists():
-        print "\nThe table does not exist: {0}".format(table)
+        print "The table does not exist: {0}".format(table)
         print "Creating the table: {0}".format(table)
         try:
             res = server.exec_query("CREATE TABLE " + dbtable +
@@ -64,7 +64,7 @@ def call_init_sysdb():
             print "ERROR: problem creating the system table %s !" % e
             sys.exit(1)
     else:
-        print "\nWARNING: system table already exists"
+        print "WARNING: system table already exists"
 
 
 def check_arg(num=1):
@@ -85,7 +85,7 @@ def check_sys_init():
         if not tbl_obj.exists():
             error = 1
     if error == 1:
-        print "\nERROR: online-migration was not initialized on this server!"
+        print "ERROR: online-migration was not initialized on this server!"
         print "       please run online-migration init_sysdb."
         sys.exit(1)
     return 0
@@ -288,11 +288,11 @@ def call_create_migration_file(db_name, file_name, version, direction):
 
 def call_create_migration(db_name, file_name, comment=""):
     if not os.path.exists(file_name):
-        print "\nERROR: %s doesn't exist !" % file_name
+        print "ERROR: %s doesn't exist !" % file_name
         sys.exit(1)
     db_obj = connect_db(server, db_name)
     if not db_obj.exists():
-        print "\nERROR: database %s doesn't exist !" % db_name
+        print "ERROR: database %s doesn't exist !" % db_name
         sys.exit(1)
     # find the migration version
     last_version = call_last_migration_version(db_name)
@@ -305,7 +305,7 @@ def call_create_migration(db_name, file_name, comment=""):
     call_create_migration_file(db_name, file_name, version, "up")
     call_add_up_in_db(db_name, version)
     call_online_schema_change(db_name, version, "%s/%04d-up.mig" % (db_name, int(version)))
-    print "\nmigration %04d created successfully !" % int(version)
+    print "migration %04d created successfully !" % int(version)
     md5check = call_create_checksum(db_name, version)
     create_meta(db_name, version, md5check, comment)
 
@@ -375,7 +375,7 @@ def call_status_db(db_name):
     query = "SELECT version, apply_date, status FROM %s where db = '%s';" % (dbtable, db_name)
     res = server.exec_query(query)
     last_ver = -2
-    print "\nMigration of schema %s : " % db_name
+    print "Migration of schema %s : " % db_name
     print '  +---------+---------------------+------------------+------------------------+'
     print '  | VERSION | APPLIED             | STATUS           |                COMMENT |'
     print '  +---------+---------------------+------------------+------------------------+'
