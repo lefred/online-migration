@@ -608,6 +608,7 @@ def call_migrate_up(db_name, last_verion):
 # Main program
 if len(sys.argv) < 2:
     print "ERROR: a command is needed"
+    print "       commands are: init, create, status, checksum, down, up, diff"
     sys.exit(1)
 else:
     with capture() as nowhere:
