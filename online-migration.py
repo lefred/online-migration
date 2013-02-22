@@ -27,7 +27,7 @@ dbtable = database + "." + table
 tmp_prefix = "tmp_online_mig"
 
 server_host = '127.0.0.1'
-server_port = '13612'
+server_port = '13611'
 server_user = 'msandbox'
 server_password = 'msandbox'
 
@@ -264,7 +264,7 @@ def call_create_migration_file(db_name, file_name, version, direction):
             r = regex.search(line)
             table = r.group(1)
         else:
-            if re.search('^insert|^create|^drop', line, re.IGNORECASE) and not re.search(' column | primary | key ', line, re.IGNORECASE):
+            if re.search('^insert|^create|^drop', line, re.IGNORECASE) and not re.search(' column | primary | key | index ', line, re.IGNORECASE):
                 open_stmt = 2
                 if len(other_stmt) > 0:
                     call_write_stmt_up("OM_IGNORE_TABLE", other_stmt, file_up)
@@ -416,6 +416,7 @@ def call_get_diff(db_name, version):
     file_schema_swp = "%s/%04d-schema.swp" % (db_name, int(version))
     tmp_db = "tmp_online_mig_%s" % (db_name)
     query = "CREATE DATABASE %s;" % tmp_db
+    server.disable_foreign_key_checks()
     res = server.exec_query(query)
     f = open(file_schema, 'r')
     f_swp = open(file_schema_swp, 'w')
@@ -444,17 +445,29 @@ def call_get_diff(db_name, version):
     destination_values = parse_connection(server_connection)
     with capture() as stepback:
         res = database_compare(source_values, destination_values, db_name, tmp_db, options)
+    buf=""
+    found=0
     for line in stepback.getvalue().splitlines(True):
         if not re.search('^.CREATE DATABASE', line) and not re.search('^--- ', line) and not re.search('^\*\*\*', line) and not re.search("^$", line) and not re.search("^\!", line):
             if not re.search('^#', line) or re.search('^# WARNING: ', line) or re.search('^#  \s+', line):
                 if re.search("in server1.%s but not in " % db_name, line):
                     print "# Element(s) present that shouldn't be: "
+                    found=1
                 elif re.search("in server1.tmp_online_mig_%s but not in " % db_name, line):
                     print "# Element(s) absent that should be present: "
+                    found=1
                 else:
-                    print line.strip()
+                    buf = "%s%s" % (buf, line)
+                    #print line.strip()
+        elif re.search("^!\s+CONSTRAINT .* FOREIGN KEY", line):
+            found=2
+    if found == 1:
+        print "%s" % buf
+    elif found == 2:
+        print "There are foreign keys that are not yet 100% supported"
     query = "DROP DATABASE %s" % tmp_db
     res = server.exec_query(query)
+    server.disable_foreign_key_checks(disable=False)
 
 
 def call_print_diff(db_name):
@@ -564,8 +577,10 @@ def call_migrate_up(db_name, last_verion):
         file_down = open("%s/%04d-down.tmp" % (db_name, int(version)), 'a')
         for line in str:
             if line[0] not in ['#', '\n', '+', '-', '@']:
-                line = re.sub(" %s\." % db_name, " ", line, 1, re.IGNORECASE)
-                file_down.write("%s\n" % line.strip())
+                # this if is required currently due to missing foreign keys in dbcopy
+                if not re.match("\s+DROP FOREIGN KEY", line):
+                    line = re.sub(" %s\." % db_name, " ", line, 1, re.IGNORECASE)
+                    file_down.write("%s\n" % line.strip())
             elif re.match("# WARNING: Objects in", line):
                 if re.match("# WARNING: Objects in \w+\.tmp_online_mig_", line):
                     to_add = 2

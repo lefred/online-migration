@@ -1,3 +1,4 @@
+SET foreign_key_checks = 0;
 CREATE TABLE `City` (
   `ID` int(11) NOT NULL AUTO_INCREMENT,
   `Name` char(35) NOT NULL DEFAULT '',

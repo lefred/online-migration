@@ -14,4 +14,8 @@ Requirements:
 * perl-DBI (dependency of pt-online-schema-change)
 * perl-DBD-MySQL (dependency of pt-online-schema-chane)
 
+Extra:
+------
 
+Currently rollback the addition of foreign keys doesn't work because foreign keys are not copied with
+mysqldbcopy see http://bugs.mysql.com/bug.php?id=63783
