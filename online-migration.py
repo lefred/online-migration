@@ -27,7 +27,7 @@ dbtable = database + "." + table
 tmp_prefix = "tmp_online_mig"
 
 server_host = '127.0.0.1'
-server_port = '13611'
+server_port = '13612'
 server_user = 'msandbox'
 server_password = 'msandbox'
 
