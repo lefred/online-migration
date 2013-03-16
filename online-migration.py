@@ -2,7 +2,6 @@
 
 import sys
 import os
-import inspect
 import hashlib
 import re
 import glob
@@ -27,15 +26,16 @@ dbtable = database + "." + table
 tmp_prefix = "tmp_online_mig"
 
 server_host = '127.0.0.1'
-server_port = '13611'
+server_port = '3306'
 server_user = 'msandbox'
 server_password = 'msandbox'
 
-server_connection = "%s:%s@%s:%s" % (server_user, server_password, server_host, server_port)
+server_connection = "%s:%s@%s:%s" % (server_user, server_password,
+                                     server_host, server_port)
 
 
 def connect_db(server, database):
-# function to connect to MySQL
+    """ Function to connect to MySQL """
     options = {}
     options["skip_grants"] = True
     db_obj = Database(server, database, options)
@@ -43,8 +43,10 @@ def connect_db(server, database):
 
 
 def call_init_sysdb():
-# function that creates the needed system database and table used by
-# online-migration
+    """
+    Function that creates the needed system database and table used by
+    online-migration
+    """
     db_obj = connect_db(server, database)
     if not db_obj.exists():
         print "The database does not exist: {0}".format(database)
@@ -55,11 +57,11 @@ def call_init_sysdb():
         print "The table does not exist: {0}".format(table)
         print "Creating the table: {0}".format(table)
         try:
-            res = server.exec_query("CREATE TABLE " + dbtable +
-                                    "(id int auto_increment primary key," +
-                                    "db varchar(100), version int," +
-                                    "start_date datetime, " +
-                                    "apply_date datetime, status varchar(10));")
+            server.exec_query("CREATE TABLE " + dbtable +
+                              "(id int auto_increment primary key," +
+                              "db varchar(100), version int," +
+                              "start_date datetime, " +
+                              "apply_date datetime, status varchar(10));")
         except Exception, e:
             print "ERROR: problem creating the system table %s !" % e
             sys.exit(1)
@@ -68,14 +70,14 @@ def call_init_sysdb():
 
 
 def check_arg(num=1):
-# check that a db was entered
+    """ check that a db was entered """
     if len(sys.argv) <= num + 1:
         print "ERROR: %i argument(s) is/are required with command %s !" % (num, sys.argv[1])
         sys.exit(1)
 
 
 def check_sys_init():
-# check if the system table are created
+    """ Check if the system table are created """
     db_obj = connect_db(server, database)
     error = 0
     if not db_obj.exists():
@@ -108,7 +110,7 @@ def create_meta(db_name, version, md5check, comment):
 
 
 def check_init(db_name):
-    # check if there is already a migration for that database
+    """ check if there is already a migration for that database """
     query = "SELECT * FROM %s WHERE `db` = \"%s\";" % (dbtable, db_name)
     res = server.exec_query(query)
     return (res is not None and len(res) >= 1)
@@ -120,14 +122,14 @@ def call_online_schema_change(db_name, version, file_name, cmd='up'):
         call_change_migration_status(db_name, version, 'running')
         line_list = line.split("::")
         if line_list[0] == "OM_IGNORE_TABLE":
- 	    server.disable_foreign_key_checks()
+            server.disable_foreign_key_checks()
             query = line_list[1]
             query_options = {
                 'params': (db_name)
             }
             try:
-                res = server.exec_query("use %s" % db_name)
-                res = server.exec_query(query)
+                server.exec_query("use %s" % db_name)
+                server.exec_query(query)
             except Exception, e:
                 print "ERROR: %s !" % e
                 sys.exit(1)
@@ -141,7 +143,7 @@ def call_online_schema_change(db_name, version, file_name, cmd='up'):
                     table = r.group(1)
                     file_down.write("DROP TABLE %s;\n" % table)
                 file_down.close()
-	    server.disable_foreign_key_checks(disable=False)
+            server.disable_foreign_key_checks(disable=False)
         else:
             cmd = "./pt-online-schema-change h=%s,P=%s,u=%s,p=%s,D=\"%s\",t=%s --alter=\"%s\" --execute >>online_migration.log 2>&1" % (server_host, server_port, server_user, server_password, db_name, line_list[0], line_list[1])
             #print cmd
@@ -278,7 +280,7 @@ def call_create_migration_file(db_name, file_name, version, direction):
                     alter_stmt += line
                 else:
                     other_stmt += line
-    #save the alter statement in a migration file
+    # save the alter statement in a migration file
     if open_stmt == 1:
         call_write_stmt_up(table, alter_stmt, file_up)
     else:
@@ -320,7 +322,7 @@ def call_create_checksum(db_name, version):
 
 
 def call_init_migration(db_name):
-# function to initiate the first migration
+    """ Function to initiate the first migration """
     if check_init(db_name):
         print "ERROR: init was already performed for database %s !" % db_name
         sys.exit(1)
@@ -351,7 +353,7 @@ def call_init_migration(db_name):
 
 
 def call_status(db_name=None):
-#display the status of the migration for all or one schema
+    """ Display the status of the migration for all or one schema """
     query = "SELECT distinct db FROM %s;" % dbtable
     res = server.exec_query(query)
     if res is None:
@@ -445,22 +447,22 @@ def call_get_diff(db_name, version):
     destination_values = parse_connection(server_connection)
     with capture() as stepback:
         res = database_compare(source_values, destination_values, db_name, tmp_db, options)
-    buf=""
-    found=0
+    buf = ""
+    found = 0
     for line in stepback.getvalue().splitlines(True):
         if not re.search('^.CREATE DATABASE', line) and not re.search('^--- ', line) and not re.search('^\*\*\*', line) and not re.search("^$", line) and not re.search("^\!", line):
             if not re.search('^#', line) or re.search('^# WARNING: ', line) or re.search('^#  \s+', line):
                 if re.search("in server1.%s but not in " % db_name, line):
                     print "# Element(s) present that shouldn't be: "
-                    found=1
+                    found = 1
                 elif re.search("in server1.tmp_online_mig_%s but not in " % db_name, line):
                     print "# Element(s) absent that should be present: "
-                    found=1
+                    found = 1
                 else:
                     buf = "%s%s" % (buf, line)
                     #print line.strip()
         elif re.search("^!\s+CONSTRAINT .* FOREIGN KEY", line):
-            found=2
+            found = 2
     if found == 1:
         print "%s" % buf
     elif found == 2:
