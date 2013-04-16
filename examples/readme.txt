@@ -14,9 +14,9 @@ mysql> create database world
 
 
 [fred@imac online-migration]$ ./online-migration.py create world examples/world_structure.sql 
-migration 0001 created successfully !
+INFO : migration 0001 created successfully !
 [fred@imac online-migration]$ ./online-migration.py create world examples/world_v2.sql 
-migration 0002 created successfully !
+INFO : migration 0002 created successfully !
 
 
 [fred@imac online-migration]$ ./online-migration.py status
@@ -30,7 +30,7 @@ Migration of schema world :
   +---------+---------------------+------------------+------------------------+
 
 [fred@imac online-migration]$ ./online-migration.py create world examples/world_v3.sql "add nice column to city"
-migration 0003 created successfully !
+INFO : migration 0003 created successfully !
 [fred@imac online-migration]$ ./online-migration.py status world
 Migration of schema world : 
   +---------+---------------------+------------------+------------------------+
@@ -46,13 +46,13 @@ ON THE PRODUCTION
 =================
 
 [fred@imac online-migration]$ ./online-migration.py init_sysdb
-The database does not exist: online_migration
-Creating the database: online_migration
-The table does not exist: migration_sys
-Creating the table: migration_sys
+INFO : The database does not exist: online_migration
+INFO : Creating the database: online_migration
+INFO : The table does not exist: migration_sys
+INFO : Creating the table: migration_sys
 
 [fred@imac online-migration]$ ./online-migration.py status world
-Warning: no migration was ever initiate on this server for world  !
+WARNING : no migration was ever initiate on this server for world  !
 Migration of schema world : 
   +---------+---------------------+------------------+------------------------+
   | VERSION | APPLIED             | STATUS           |                COMMENT |

@@ -20,13 +20,13 @@ from contextlib import contextmanager
 
 server_host = '127.0.0.1'
 server_port = '3306'
-server_user = 'msandbox'
-server_password = 'msandbox'
+server_user = 'root'
+server_password = ''
 
 server_connection = "%s:%s@%s:%s" % (server_user, server_password,
                                      server_host, server_port)
 
-logging.basicConfig(format = "%(filename)s - %(levelname)s : %(message)s", level = logging.INFO)
+logging.basicConfig(format = "%(levelname)s : %(message)s", level = logging.INFO)
 
 def memoize(func):
     cache = dict()
@@ -120,7 +120,7 @@ class OnlineMigration(object):
         """ Check if the system table are created """
         if self.migration_db.exists() is False or \
            table.Table(self.server, self.migration_table).exists() is False:
-            logging.error("online-migration was not initialized on this server!\n       please run online-migration init_sysdb.")
+            logging.error("online-migration was not initialized on this server!\nplease run online-migration init_sysdb.")
             sys.exit(1)
 
     def create_meta(self, db_name, version, md5check, comment):
@@ -494,10 +494,13 @@ class OnlineMigration(object):
 
     def mysql_create_schema(self, db_name, file_name):
         #f = open(file_name,"r")
+        s_pwd = ""
+        if len(server_password) > 0:
+		s_pwd="-p%s" % server_password
         self.change_migration_status(db_name, 0, 'running')
-        cmd = "mysql -u %s -p%s -h %s -P %s < %s >>online_migration.log 2>&1" % (server_user, server_password, server_host, server_port, file_name)
+        cmd = "mysql -u %s %s -h %s -P %s < %s >>online_migration.log 2>&1" % (server_user, s_pwd, server_host, server_port, file_name)
         if call(cmd, shell=True) == 0:
-            print "Schema creation run successfully"
+            logging.info("Schema creation run successfully")
         else:
             logging.error(u"ERROR: problem while running :\n   %s" % cmd)
             sys.exit(1)
@@ -525,7 +528,7 @@ class OnlineMigration(object):
         file_schema.close()
 
     def migrate_down(self, db_name, last_version):
-        print "rollback from %04d to %04d" % (int(last_version), int(last_version) - 1)
+        logging.info(u"rollback from %04d to %04d" % (int(last_version), int(last_version) - 1))
         self.online_schema_change(db_name, last_version, "%s/%04d-down.mig" % (db_name, int(last_version)), 'down')
         self.change_migration_status(db_name, last_version, 'rollback')
 
@@ -543,7 +546,7 @@ class OnlineMigration(object):
             (ver, md5, comment) = self.read_meta(db_name, int(version))
             query_options = {'skip_data': True, 'force': True}
             db_list = []
-            grp = re.match("(\w+)(?:\:(\w+))?", "%s:%s_%s" % (db_name, tmp_prefix, db_name))
+            grp = re.match("(\w+)(?:\:(\w+))?", "%s:%s_%s" % (db_name, self.tmp_prefix, db_name))
             db_entry = grp.groups()
             db_list.append(db_entry)
             source_values = options.parse_connection(server_connection)
@@ -562,7 +565,7 @@ class OnlineMigration(object):
                 'difftype': 'sql', 'width': 75, 'changes-for': 'server1',
                 'skip_grants': True}
             with capture() as stepback:
-                res = dbcompare.database_compare(source_values, destination_values, db_name, "%s_%s" % (tmp_prefix, db_name), query_options)
+                res = dbcompare.database_compare(source_values, destination_values, db_name, "%s_%s" % (self.tmp_prefix, db_name), query_options)
             str = stepback.getvalue().splitlines(True)
             to_add = 0
             file_down = open("%s/%04d-down.tmp" % (db_name, int(version)), 'a')
@@ -589,7 +592,7 @@ class OnlineMigration(object):
             file_down.close()
             file_down_tmp = "%s/%04d-down.tmp" % (db_name, int(version))
             self.create_migration_file(db_name, file_down_tmp, version, "down")
-            query = "DROP DATABASE %s_%s" % (tmp_prefix, db_name)
+            query = "DROP DATABASE %s_%s" % (self.tmp_prefix, db_name)
             res = self.server.exec_query(query)
             os.remove(file_down_tmp)
             file_schema = "%s/%04d-schema.img" % (db_name, int(version))
