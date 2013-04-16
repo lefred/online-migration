@@ -202,6 +202,8 @@ class OnlineMigration(object):
         pend = 0
         metafiles = glob.glob('%s/*.meta' % db_name)
         metafiles.sort()
+	if not last_ver:
+	    last_ver=-1
         for mig in metafiles:
             a = mig.split('/')
             b = a[1].split('.')
@@ -264,9 +266,14 @@ class OnlineMigration(object):
         other_stmt = ""
         open_stmt = 0  # 1=alter, 2=other (insert, create, drop)
         for line in iter(f):
-            if re.search('^alter', line, re.IGNORECASE):
+            if re.search('AUTO_INCREMENT=', line):
+                logging.debug("Auto_incrment reset to ignore")
+            elif re.search('^alter', line, re.IGNORECASE):
                 open_stmt = 1
                 if len(alter_stmt) > 0:
+                    #as we remove auto_increment we need to replace , by ;
+            	    alter_stmt = re.sub(",$",";", alter_stmt, 1, re.IGNORECASE)
+	    	    logging.debug(u"[%s]" % alter_stmt)
                     #save the alter statement in a migration file
                     self.write_stmt_up(table, alter_stmt, file_up)
                 if len(other_stmt) > 0:
@@ -288,7 +295,7 @@ class OnlineMigration(object):
                     other_stmt += line
                 else:
                     if open_stmt == 1:
-                        alter_stmt += line
+                            alter_stmt += line
                     else:
                         other_stmt += line
         # save the alter statement in a migration file
@@ -446,7 +453,7 @@ class OnlineMigration(object):
         query_options = {
             'run_all_tests': True, 'reverse': False, 'verbosity': None,
             'no_object_check': False, 'no_data': True, 'quiet': True,
-            'difftype': 'context', 'width': 75, 'changes-for': 'server1',
+            'difftype': 'differ', 'width': 75, 'changes-for': 'server1',
             'skip_grants': True}
         source_values = options.parse_connection(server_connection)
         destination_values = options.parse_connection(server_connection)
@@ -455,23 +462,17 @@ class OnlineMigration(object):
         buf = ""
         found = 0
         for line in stepback.getvalue().splitlines(True):
-            if not re.search('^.CREATE DATABASE', line) and not re.search('^--- ', line) and not re.search('^\*\*\*', line) and not re.search("^$", line) and not re.search("^\!", line):
-                if not re.search('^#', line) or re.search('^# WARNING: ', line) or re.search('^#  \s+', line):
-                    if re.search("in server1.%s but not in " % db_name, line):
-                        print "# Element(s) present that shouldn't be: "
-                        found = 1
-                    elif re.search("in server1.tmp_online_mig_%s but not in " % db_name, line):
-                        print "# Element(s) absent that should be present: "
-                        found = 1
-                    else:
-                        buf = "%s%s" % (buf, line)
-                        #print line.strip()
-            elif re.search("^!\s+CONSTRAINT .* FOREIGN KEY", line):
-                found = 2
-        if found == 1:
-            print "%s" % buf
-        elif found == 2:
-            logging.info("There are foreign keys that are not yet 100% supported")
+            logging.debug(u"%s" % line)
+            if re.search('CREATE TABLE', line):
+                line = re.sub("CREATE","", line, 1, re.IGNORECASE)
+                line = re.sub("\(\n","", line, 1, re.IGNORECASE)
+		buf=line
+            if (re.search('^\+', line) or re.search('^\-', line)) and not re.search('CREATE DATABASE', line) and not re.search('CONSTRAINT.*FOREIGN KEY', line):
+                line = re.sub("\n","", line, 1, re.IGNORECASE)
+                if len(buf) > 0:
+		    print u"%s" % buf
+                    buf=""
+		print u"%s" % line 
         query = "DROP DATABASE %s" % tmp_db
         self.server.exec_query(query)
         self.server.disable_foreign_key_checks(disable=False)
@@ -523,6 +524,11 @@ class OnlineMigration(object):
         i = 0
         for line in dbschema:
             if i > 0:
+            	if re.search("\s+CONSTRAINT .* FOREIGN KEY", line):
+                    # dirty hack to try to support foreign keys
+		    logging.debug("We found a constraint to rename")
+                    line = re.sub("CONSTRAINT `_*","CONSTRAINT `", line, 1, re.IGNORECASE)
+                
                 file_schema.write("%s" % line)
             i += 1
         file_schema.close()
@@ -676,6 +682,10 @@ def main():
             migration.check_sys_init()
             db_name = (sys.argv[2])
             last_version = migration.last_migration_version(db_name)
+            if last_version is None and len(sys.argv) > 3:
+                logging.error("You can only migrate multiple versions when at least one has been already performed")
+                sys.exit(1)
+             
             if len(sys.argv) == 4 and re.search("\d", sys.argv[3]):
                 logging.info(u"You want to migrate up %d version(s)" % int(sys.argv[3]))
                 tot = 0

@@ -18,7 +18,7 @@ INFO : migration 0001 created successfully !
 [fred@imac online-migration]$ ./online-migration.py create world examples/world_v2.sql 
 INFO : migration 0002 created successfully !
 
-
+ARNING 
 [fred@imac online-migration]$ ./online-migration.py status
 Migration of schema world : 
   +---------+---------------------+------------------+------------------------+
@@ -37,7 +37,7 @@ Migration of schema world :
   | VERSION | APPLIED             | STATUS           |                COMMENT |
   +---------+---------------------+------------------+------------------------+
   |    0000 | 2013-02-21 22:38:47 |               ok |           Initial file |
-  |    0001 | 2013-02-21 22:38:56 |               ok |                   none |
+  |    0001 | 2013-02-21 22:38:55 |               ok |                   none |
   |    0002 | 2013-02-21 22:39:11 |               ok |                   none |
   |    0003 | 2013-02-21 22:42:13 |               ok | add nice column to cit |
   +---------+---------------------+------------------+------------------------+
@@ -64,7 +64,7 @@ Migration of schema world :
   +---------+---------------------+------------------+------------------------+
 
 [fred@imac online-migration]$ ./online-migration.py up world
-Schema creation run successfully
+INFO : Schema creation run successfully
 [fred@imac online-migration]$ ./online-migration.py status world
 Migration of schema world : 
   +---------+---------------------+------------------+------------------------+
@@ -108,4 +108,41 @@ Migration of schema world :
   |    0003 | 2013-02-22 09:18:36 |               ok | add nice column to cit |
   +---------+---------------------+------------------+------------------------+
 
+[fred@macbookair online-migration]$ ./online-migration.py down world to 1
+INFO : You want to migrate down to version 0001
+INFO : Ok this version was applied
+INFO : rollback from 0003 to 0002
+INFO : rollback from 0002 to 0001
+[fred@macbookair online-migration]$ ./online-migration.py status
+Migration of schema world : 
+  +---------+---------------------+------------------+------------------------+
+  | VERSION | APPLIED             | STATUS           |                COMMENT |
+  +---------+---------------------+------------------+------------------------+
+  |    0000 | 2013-04-17 00:20:22 |               ok |           Initial file |
+  |    0001 | 2013-04-17 01:13:02 |               ok |                   none |
+  |    0002 | 2013-04-17 01:30:30 |         rollback |                   none |
+  |    0003 | 2013-04-17 01:30:29 |         rollback | add nice column to cit |
+  |    0002 |                none |          pending |                   none |
+  |    0003 |                none |          pending | add nice column to cit |
+  +---------+---------------------+------------------+------------------------+
 
+
+mysql> alter table City modify CountryCode varchar(10);
+
+[fred@macbookair online-migration]$ ./online-migration.py status world
+Migration of schema world : 
+  +---------+---------------------+------------------+------------------------+
+  | VERSION | APPLIED             | STATUS           |                COMMENT |
+  +---------+---------------------+------------------+------------------------+
+  |    0000 | 2013-04-17 00:20:22 |               ok |           Initial file |
+  |    0001 | 2013-04-17 00:20:25 |               ok |                   none |
+  |    0002 | 2013-04-17 00:24:26 |               ok |                   none |
+  |    0003 | 2013-04-17 00:24:27 | checksum problem | add nice column to cit |
+  +---------+---------------------+------------------+------------------------+
+
+
+[fred@macbookair online-migration]$ ./online-migration.py diff world
+WARNING : Schema of world doesn't have expected checksum (4478d85870969436400bac023f2b2b7c)
+   TABLE `City` 
+-   `CountryCode` varchar(10) DEFAULT NULL,
++   `CountryCode` char(3) NOT NULL DEFAULT '',
