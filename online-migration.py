@@ -1,5 +1,7 @@
 #!/usr/bin/python
 
+# GPLv2 - All right reserved to Frédéric Descamps - lefred@lefred.be
+
 import sys
 import os
 import hashlib
