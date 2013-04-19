@@ -1,7 +1,0 @@
-
-service mysqld start
-
-use online_migration ; delete from migration_sys; drop database fred;
-
-./online-migration.py up fred
-./online-migration.py status fred
