@@ -37,18 +37,18 @@ Check the status::
 
 Creation of migration releases with comment::
 
-[fred@imac online-migration]$ ./online-migration.py create world examples/world_v3.sql "add nice column to city"
-INFO : migration 0003 created successfully !
-[fred@imac online-migration]$ ./online-migration.py status world
-Migration of schema world : 
-  +---------+---------------------+------------------+------------------------+
-  | VERSION | APPLIED             | STATUS           |                COMMENT |
-  +---------+---------------------+------------------+------------------------+
-  |    0000 | 2013-02-21 22:38:47 |               ok |           Initial file |
-  |    0001 | 2013-02-21 22:38:55 |               ok |                   none |
-  |    0002 | 2013-02-21 22:39:11 |               ok |                   none |
-  |    0003 | 2013-02-21 22:42:13 |               ok | add nice column to cit |
-  +---------+---------------------+------------------+------------------------+
+        [fred@imac online-migration]$ ./online-migration.py create world examples/world_v3.sql "add nice column to city"
+        INFO : migration 0003 created successfully !
+        [fred@imac online-migration]$ ./online-migration.py status world
+        Migration of schema world : 
+          +---------+---------------------+------------------+------------------------+
+          | VERSION | APPLIED             | STATUS           |                COMMENT |
+          +---------+---------------------+------------------+------------------------+
+          |    0000 | 2013-02-21 22:38:47 |               ok |           Initial file |
+          |    0001 | 2013-02-21 22:38:55 |               ok |                   none |
+          |    0002 | 2013-02-21 22:39:11 |               ok |                   none |
+          |    0003 | 2013-02-21 22:42:13 |               ok | add nice column to cit |
+          +---------+---------------------+------------------+------------------------+
 
 ON THE PRODUCTION
 =================
