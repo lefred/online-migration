@@ -10,18 +10,27 @@ and Oracle MySQL utilities (http://dev.mysql.com/doc/workbench/en/mysql-utilitie
 Requirements:
 -------------
 
-* pt-online-schema-change (currently provided with the script)
-* mysql-utilities 
+* pt-online-schema-change 
+* mysql-utilities (1.3.3)
 * mysql-connector-python
 * mysql client
 * perl-DBI (dependency of pt-online-schema-change)
 * perl-DBD-MySQL (dependency of pt-online-schema-chane)
+
+
+Puppet:
+-------
+
+A new type (**mysql_schema**) and its provider as been added to the project
 
 Extra:
 ------
 
 Currently rollback the addition of foreign keys doesn't work because foreign keys are not copied with
 mysqldbcopy see http://bugs.mysql.com/bug.php?id=63783
+
+A bug in pt-online-schema-change fails the example with the world database, see https://bugs.launchpad.net/percona-toolkit/+bug/1207186
+
 
 
 Copyrights:
