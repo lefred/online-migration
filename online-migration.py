@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# GPLv2 - All right reserved to Frédéric Descamps - lefred@lefred.be
+# GPLv2 - All right reserved to Frederic Descamps - lefred@lefred.be
 
 import sys
 import os
@@ -15,6 +15,8 @@ import logging
 # New imports
 from mysql.utilities.common import (database, options, server, table)
 from mysql.utilities.command import dbcompare, dbcopy, dbexport
+from mysql.utilities.common.ip_parser import parse_connection
+
 
 #sys.path.append("./mysql")
 from subprocess import call
@@ -29,6 +31,9 @@ server_connection = "%s:%s@%s:%s" % (server_user, server_password,
                                      server_host, server_port)
 
 logging.basicConfig(format = "%(levelname)s : %(message)s", level = logging.INFO)
+
+# script version
+version=0.2
 
 def memoize(func):
     cache = dict()
@@ -118,12 +123,16 @@ class OnlineMigration(object):
             logging.error(u"%i argument(s) is/are required with command %s !" % (num, sys.argv[1]))
             sys.exit(1)
 
-    def check_sys_init(self):
+    def check_sys_init(self, exit=1):
         """ Check if the system table are created """
         if self.migration_db.exists() is False or \
            table.Table(self.server, self.migration_table).exists() is False:
-            logging.error("online-migration was not initialized on this server!\nplease run online-migration init_sysdb.")
-            sys.exit(1)
+            if exit == 1:
+            	logging.error("online-migration was not initialized on this server!\nplease run online-migration init_sysdb.")
+            	sys.exit(1)
+            else:
+		return 1
+	return 0
 
     def create_meta(self, db_name, version, md5check, comment):
         file_meta = open("%s/%04d-up.meta" % (db_name, int(version)), 'w')
@@ -159,16 +168,19 @@ class OnlineMigration(object):
                 # create the undo for table creation here
                 if cmd == "up":
                     file_down = open("%s/%04d-down.mig" % (db_name, int(version)), 'a')
-                    if re.search('^create', query, re.IGNORECASE):
-                        query = re.sub("`", " ", query, 0, re.IGNORECASE)
-                        regex = re.compile("create\s+table\s+(\w+)", re.IGNORECASE)
+                    #if re.search('^create', query, re.IGNORECASE):
+                    if re.search('^create' + '(?i)', query):
+                        #query = re.sub("`", " ", query, 0, re.IGNORECASE)
+                        query = re.sub("`" + '(?i)', " ", query, 0)
+                        #regex = re.compile("create\s+table\s+(\w+)", re.IGNORECASE)
+                        regex = re.compile("create\s+table\s+(\w+)"+ '(?i)')
                         r = regex.search(query)
                         table = r.group(1)
                         file_down.write("DROP TABLE %s;\n" % table)
                     file_down.close()
                 self.server.disable_foreign_key_checks(disable=False)
             else:
-                cmd = "./pt-online-schema-change h=%s,P=%s,u=%s,p=%s,D=\"%s\",t=%s --alter=\"%s\" --execute >>online_migration.log 2>&1" % (server_host, server_port, server_user, server_password, db_name, line_list[0], line_list[1])
+                cmd = "pt-online-schema-change h=%s,P=%s,u=%s,p=%s,D=\"%s\",t=%s --alter=\"%s\" --execute >>online_migration.log 2>&1" % (server_host, server_port, server_user, server_password, db_name, line_list[0], line_list[1])
                 #print cmd
                 if call(cmd, shell=True) != 0:
                     logging.error(u"Problem while running :\n   %s" % cmd )
@@ -177,7 +189,8 @@ class OnlineMigration(object):
 
     def write_stmt_up(self, table, alter_stmt, file):
         alter_stmt = alter_stmt.replace('"', '\"')
-        alter_stmt = re.sub("alter\s+table\s+%s" % table, "", alter_stmt, 1, re.IGNORECASE)
+        #alter_stmt = re.sub("alter\s+table\s+%s" % table, "", alter_stmt, 1, re.IGNORECASE)
+        alter_stmt = re.sub("alter\s+table\s+%s" % table + '(?i)', "", alter_stmt, 1)
         alter_stmt = alter_stmt.replace('\n', ' ')
         file.write("%s::%s\n" % (table, alter_stmt))
 
@@ -270,11 +283,16 @@ class OnlineMigration(object):
         for line in iter(f):
             if re.search('AUTO_INCREMENT=', line):
                 logging.debug("Auto_incrment reset to ignore")
-            elif re.search('^alter', line, re.IGNORECASE):
+            	#line= re.sub("AUTO_INCREMENT=(\d)*","", line, 1, re.IGNORECASE)
+            	line= re.sub("AUTO_INCREMENT=(\d)*" + '(?i)',"", line, 1)
+                other_stmt += line
+            #elif re.search('^alter', line, re.IGNORECASE):
+            elif re.search('^alter' + '(?i)', line):
                 open_stmt = 1
                 if len(alter_stmt) > 0:
                     #as we remove auto_increment we need to replace , by ;
-            	    alter_stmt = re.sub(",$",";", alter_stmt, 1, re.IGNORECASE)
+            	    #alter_stmt = re.sub(",$",";", alter_stmt, 1, re.IGNORECASE)
+            	    alter_stmt = re.sub(",$" + '(?i)',";", alter_stmt, 1)
 	    	    logging.debug(u"[%s]" % alter_stmt)
                     #save the alter statement in a migration file
                     self.write_stmt_up(table, alter_stmt, file_up)
@@ -282,11 +300,12 @@ class OnlineMigration(object):
                     self.write_stmt_up("OM_IGNORE_TABLE", other_stmt, file_up)
                     other_stmt = ""
                 alter_stmt = line
-                regex = re.compile("alter\s+table\s+([^\s]*)\s+.*", re.IGNORECASE)
+                #regex = re.compile("alter\s+table\s+([^\s]*)\s+.*", re.IGNORECASE)
+                regex = re.compile("alter\s+table\s+([^\s]*)\s+.*"+ '(?i)')
                 r = regex.search(line)
                 table = r.group(1)
             else:
-                if re.search('^insert|^create|^drop', line, re.IGNORECASE) and not re.search(' column | primary | key | index ', line, re.IGNORECASE):
+                if re.search('^insert|^create|^drop'+ '(?i)', line) and not re.search(' column | primary | key | index '+ '(?i)', line):
                     open_stmt = 2
                     if len(other_stmt) > 0:
                         self.write_stmt_up("OM_IGNORE_TABLE", other_stmt, file_up)
@@ -438,7 +457,8 @@ class OnlineMigration(object):
         f_swp.write("USE %s\n" % tmp_db)
         buff = ""
         for line in f.readlines():
-            if re.search(';$', line, re.IGNORECASE):
+            #if re.search(';$', line, re.IGNORECASE):
+            if re.search(';$' + '(?i)', line):
                 buff = buff + line
                 f_swp.write(buff)
                 buff = ""
@@ -457,8 +477,8 @@ class OnlineMigration(object):
             'no_object_check': False, 'no_data': True, 'quiet': True,
             'difftype': 'differ', 'width': 75, 'changes-for': 'server1',
             'skip_grants': True}
-        source_values = options.parse_connection(server_connection)
-        destination_values = options.parse_connection(server_connection)
+        source_values = parse_connection(server_connection)
+        destination_values = parse_connection(server_connection)
         with capture() as stepback:
             dbcompare.database_compare(source_values, destination_values, db_name, tmp_db, query_options)
         buf = ""
@@ -466,11 +486,14 @@ class OnlineMigration(object):
         for line in stepback.getvalue().splitlines(True):
             logging.debug(u"%s" % line)
             if re.search('CREATE TABLE', line):
-                line = re.sub("CREATE","", line, 1, re.IGNORECASE)
-                line = re.sub("\(\n","", line, 1, re.IGNORECASE)
+                line = re.sub("CREATE" + '(?i)',"", line, 1)
+                #line = re.sub("CREATE","", line, 1, re.IGNORECASE)
+                #line = re.sub("\(\n","", line, 1, re.IGNORECASE)
+                line = re.sub("\(\n" + '(?i)',"", line, 1)
 		buf=line
             if (re.search('^\+', line) or re.search('^\-', line)) and not re.search('CREATE DATABASE', line) and not re.search('CONSTRAINT.*FOREIGN KEY', line):
-                line = re.sub("\n","", line, 1, re.IGNORECASE)
+                #line = re.sub("\n","", line, 1, re.IGNORECASE)
+                line = re.sub("\n" + '(?i)',"", line, 1)
                 if len(buf) > 0:
 		    print u"%s" % buf
                     buf=""
@@ -511,12 +534,14 @@ class OnlineMigration(object):
 
     def get_schema_img(self, db_name):
         with capture() as dbschema:
-            server_values = options.parse_connection(server_connection)
+            server_values = parse_connection(server_connection)
             query_options = {'skip_data': True, 'skip_grants': True, 'skip_create': True,
                        'rpl_mode': None, 'quiet': True}
-            db_list = []
-            db_list.append(db_name)
-            dbexport.export_databases(server_values, db_list, query_options)
+        db_list = []
+        db_list.append(db_name)
+        with capture() as dbschema:
+           dbexport.export_databases(server_values, db_list, query_options)
+
         db_schema = dbschema.getvalue().splitlines(True)
         return db_schema
 
@@ -529,7 +554,8 @@ class OnlineMigration(object):
             	if re.search("\s+CONSTRAINT .* FOREIGN KEY", line):
                     # dirty hack to try to support foreign keys
 		    logging.debug("We found a constraint to rename")
-                    line = re.sub("CONSTRAINT `_*","CONSTRAINT `", line, 1, re.IGNORECASE)
+                    #line = re.sub("CONSTRAINT `_*","CONSTRAINT `", line, 1, re.IGNORECASE)
+                    line = re.sub("CONSTRAINT `_*" + '(?i)',"CONSTRAINT `", line, 1)
                 
                 file_schema.write("%s" % line)
             i += 1
@@ -557,8 +583,8 @@ class OnlineMigration(object):
             grp = re.match("(\w+)(?:\:(\w+))?", "%s:%s_%s" % (db_name, self.tmp_prefix, db_name))
             db_entry = grp.groups()
             db_list.append(db_entry)
-            source_values = options.parse_connection(server_connection)
-            destination_values = options.parse_connection(server_connection)
+            source_values = parse_connection(server_connection)
+            destination_values = parse_connection(server_connection)
             with capture() as stepback:
                 dbcopy.copy_db(source_values, destination_values, db_list, query_options)
             self.online_schema_change(db_name, version, "%s/%04d-up.mig" % (db_name, int(version)))
@@ -581,7 +607,8 @@ class OnlineMigration(object):
                 if line[0] not in ['#', '\n', '+', '-', '@']:
                     # this if is required currently due to missing foreign keys in dbcopy
                     if not re.match("\s+DROP FOREIGN KEY", line):
-                        line = re.sub(" %s\." % db_name, " ", line, 1, re.IGNORECASE)
+                        #line = re.sub(" %s\." % db_name, " ", line, 1, re.IGNORECASE)
+                        line = re.sub(" %s\." % db_name + '(?i)', " ", line, 1)
                         file_down.write("%s\n" % line.strip())
                 elif re.match("# WARNING: Objects in", line):
                     if re.match("# WARNING: Objects in \w+\.tmp_online_mig_", line):
@@ -609,7 +636,7 @@ class OnlineMigration(object):
 
 def main():
     if len(sys.argv) < 2:
-        logging.error("A command is needed\ncommands are: init, create, status, checksum, down, up, diff")
+        logging.error("A command is needed\ncommands are: init, create, status, checksum, down, up, diff, version")
         sys.exit(1)
     else:
         with capture() as nowhere:
@@ -703,14 +730,14 @@ def main():
             elif len(sys.argv) == 5:
                 if sys.argv[3] == 'to' and re.search("\d", sys.argv[4]):
                     logging.info(u"You want to migrate up to version %04d" % int(sys.argv[4]))
-                    if int(sys.argv[4]) == 0:
-                        migration.mysql_create_schema(db_name, "%s/0000-up.mig" % db_name)
-                    else:
-                        if migration.check_version_pending(db_name, int(sys.argv[4])):
-                            logging.info("Ok this version is pending")
-                            while int(last_version) < int(sys.argv[4]):
-                                migration.migrate_up(db_name, last_version)
-                                last_version = migration.last_migration_version(db_name)
+                    if migration.check_version_pending(db_name, int(sys.argv[4])):
+                        logging.info("Ok this version is pending")
+                        while int(last_version) < int(sys.argv[4]):
+                            migration.migrate_up(db_name, last_version)
+                            last_version = migration.last_migration_version(db_name)
+		    else:
+                        logging.error(u"This version (%04d) is not available as a pending migration !" % int(sys.argv[4]))
+                        sys.exit(1)
             else:
                 if last_version is not None:
                     migration.migrate_up(db_name, last_version)
@@ -721,6 +748,15 @@ def main():
             migration.check_sys_init()
             db_name = (sys.argv[2])
             migration.print_diff(db_name)
-
+        elif sys.argv[1] == 'version':
+	    print "online-migration.py %s" % version
+	elif sys.argv[1] == 'last_version':
+            migration.check_arg(1)
+            if migration.check_sys_init(0) == 1:
+	       	print -1
+            else:
+            	db_name = (sys.argv[2])
+            	last_version = migration.last_migration_version(db_name)
+	    	print last_version
 
 main()
