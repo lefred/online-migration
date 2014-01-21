@@ -33,7 +33,7 @@ server_connection = "%s:%s@%s:%s" % (server_user, server_password,
 logging.basicConfig(format = "%(levelname)s : %(message)s", level = logging.INFO)
 
 # script version
-version=0.2
+version=0.3
 
 def memoize(func):
     cache = dict()
@@ -188,10 +188,10 @@ class OnlineMigration(object):
         self.change_migration_status(db_name, version, 'ok')
 
     def write_stmt_up(self, table, alter_stmt, file):
-        alter_stmt = alter_stmt.replace('"', '\"')
         #alter_stmt = re.sub("alter\s+table\s+%s" % table, "", alter_stmt, 1, re.IGNORECASE)
         alter_stmt = re.sub("alter\s+table\s+%s" % table + '(?i)', "", alter_stmt, 1)
         alter_stmt = alter_stmt.replace('\n', ' ')
+        alter_stmt = re.sub("^\s+", "", alter_stmt)
         file.write("%s::%s\n" % (table, alter_stmt))
 
     def change_migration_status(self, db_name, version, status):
@@ -300,10 +300,11 @@ class OnlineMigration(object):
                     self.write_stmt_up("OM_IGNORE_TABLE", other_stmt, file_up)
                     other_stmt = ""
                 alter_stmt = line
+	    	logging.debug(u"[%s]" % alter_stmt)
                 #regex = re.compile("alter\s+table\s+([^\s]*)\s+.*", re.IGNORECASE)
-                regex = re.compile("alter\s+table\s+([^\s]*)\s+.*"+ '(?i)')
+                regex = re.compile("alter\s+table\s+`([^\s]*)`\.`([^\s]*)`\s+.*"+ '(?i)')
                 r = regex.search(line)
-                table = r.group(1)
+                table = r.group(2)
             else:
                 if re.search('^insert|^create|^drop'+ '(?i)', line) and not re.search(' column | primary | key | index '+ '(?i)', line):
                     open_stmt = 2
@@ -321,6 +322,8 @@ class OnlineMigration(object):
                         other_stmt += line
         # save the alter statement in a migration file
         if open_stmt == 1:
+            alter_stmt = re.sub("`\w+`\.`\w+`", table, alter_stmt)
+            alter_stmt = re.sub(",$", "", alter_stmt)
             self.write_stmt_up(table, alter_stmt, file_up)
         else:
             self.write_stmt_up("OM_IGNORE_TABLE", other_stmt, file_up)
@@ -540,7 +543,7 @@ class OnlineMigration(object):
         db_list = []
         db_list.append(db_name)
         with capture() as dbschema:
-           dbexport.export_databases(server_values, db_list, query_options)
+           dbexport.export_databases(server_values, db_list, sys.stdout, query_options)
 
         db_schema = dbschema.getvalue().splitlines(True)
         return db_schema
@@ -629,7 +632,7 @@ class OnlineMigration(object):
             self.create_migration_file(db_name, file_down_tmp, version, "down")
             query = "DROP DATABASE %s_%s" % (self.tmp_prefix, db_name)
             res = self.server.exec_query(query)
-            os.remove(file_down_tmp)
+            #os.remove(file_down_tmp)
             file_schema = "%s/%04d-schema.img" % (db_name, int(version))
             self.create_schema_img(db_name, file_schema)
 

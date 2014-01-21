@@ -1,0 +1,37 @@
+--- /usr/lib/python2.7/site-packages/mysql/utilities/common/sql_transform.py	2013-12-09 19:43:59.000000000 +0100
++++ /home/fred/sql_transform.py	2014-01-21 21:50:33.301593091 +0100
+@@ -994,6 +994,26 @@
+                     for idx in self.dest_tbl.get_tbl_indexes()]
+         src_idx = [('',) + tuple(idx[1:])
+                    for idx in self.src_tbl.get_tbl_indexes()]
++	
++    	#
++    	# Added by lefred@percona.com
++    	# to bypass primary key diff when single key
++    	#
++
++        dest_idx_nocard = []
++        src_idx_nocard = []
++        for i in dest_idx:
++		l = list(i)
++		l[6] = ''
++		i = tuple(l)
++		dest_idx_nocard.append(i)
++        for i in src_idx:
++		l = list(i)
++		l[6] = ''
++		i = tuple(l)
++		src_idx_nocard.append(i)
++        dest_idx = dest_idx_nocard[:]
++        src_idx = src_idx_nocard[:]
+ 
+         # Now we determine the indexes we need to add and those to drop
+         _, drop_idx, add_idx = get_common_lists(dest_idx, src_idx)
+@@ -1110,7 +1130,6 @@
+         # change statements. Method returns tuple of (drop, add).
+         indexes = self._get_indexes(q_src_db_name, q_src_tbl_name,
+                                     q_dest_db_name, q_dest_tbl_name)
+-
+         # For column changes, we need two collections: drop statements, add and
+         # change statements. Method returns tuple of (drop, add/change).
+         columns = self._get_columns(self.destination[_COLUMN_DEF],
