@@ -540,7 +540,7 @@ class OnlineMigration(object):
         db_list = []
         db_list.append(db_name)
         with capture() as dbschema:
-           dbexport.export_databases(server_values, db_list, query_options)
+           dbexport.export_databases(server_values, db_list, sys.stdout query_options)
 
         db_schema = dbschema.getvalue().splitlines(True)
         return db_schema
