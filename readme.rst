@@ -1,3 +1,7 @@
+Note: I've reset the merge from Gaëtan Denaisse as it brakes some of my usage. I'll review it more carrefully and
+merge later. I'll also make it compatible with last mysql-utilities
+
+
 online-migration
 ================
 
