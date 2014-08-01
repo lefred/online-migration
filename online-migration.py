@@ -301,10 +301,15 @@ class OnlineMigration(object):
                     other_stmt = ""
                 alter_stmt = line
 	    	logging.debug(u"[%s]" % alter_stmt)
-                #regex = re.compile("alter\s+table\s+([^\s]*)\s+.*", re.IGNORECASE)
+                #import pdb; pdb.set_trace()
                 regex = re.compile("alter\s+table\s+`([^\s]*)`\.`([^\s]*)`\s+.*"+ '(?i)')
                 r = regex.search(line)
-                table = r.group(2)
+                if not r:
+                   regex = re.compile("alter\s+table\s+([^\s]*)\s+.*", re.IGNORECASE)
+                   r = regex.search(line)
+                   table = r.group(1)
+                else:
+                   table = r.group(2)
             else:
                 if re.search('^insert|^create|^drop'+ '(?i)', line) and not re.search(' column | primary | key | index '+ '(?i)', line):
                     open_stmt = 2
