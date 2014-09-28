@@ -365,7 +365,7 @@ class OnlineMigration(object):
         tmp_file = "%s/%04d.schema_tmp" % (db_name, int(version))
         self.create_schema_img(db_name, tmp_file)
         md5check = calculate_md5(tmp_file)
-        os.remove(tmp_file)
+        #os.remove(tmp_file)
         return md5check
 
     def init_migration(self, db_name):
@@ -567,7 +567,8 @@ class OnlineMigration(object):
 		    logging.debug("We found a constraint to rename")
                     #line = re.sub("CONSTRAINT `_*","CONSTRAINT `", line, 1, re.IGNORECASE)
                     line = re.sub("CONSTRAINT `_*" + '(?i)',"CONSTRAINT `", line, 1)
-                
+                if re.search("^SET \@", line):
+                    line = "" 
                 file_schema.write("%s" % line)
             i += 1
         file_schema.close()
