@@ -487,7 +487,7 @@ class OnlineMigration(object):
             'run_all_tests': True, 'reverse': False, 'verbosity': None,
             'no_object_check': False, 'no_data': True, 'quiet': True,
             'difftype': 'differ', 'width': 75, 'changes-for': 'server1',
-            'skip_grants': True}
+            'skip_grants': True, 'skip_gtid': True}
         source_values = parse_connection(server_connection)
         destination_values = parse_connection(server_connection)
         with capture() as stepback:
@@ -547,7 +547,7 @@ class OnlineMigration(object):
         with capture() as dbschema:
             server_values = parse_connection(server_connection)
             query_options = {'skip_data': True, 'skip_grants': True, 'skip_create': True,
-                       'rpl_mode': None, 'quiet': True}
+                       'rpl_mode': None, 'skip_gtid': True, 'quiet': True}
         db_list = []
         db_list.append(db_name)
         with capture() as dbschema:
@@ -609,7 +609,7 @@ class OnlineMigration(object):
                 'run_all_tests': True, 'reverse': True, 'verbosity': None,
                 'no_object_check': False, 'no_data': True, 'quiet': True,
                 'difftype': 'sql', 'width': 75, 'changes-for': 'server1',
-                'skip_grants': True}
+                'skip_grants': True, 'skip_gtid': True}
             with capture() as stepback:
                 res = dbcompare.database_compare(source_values, destination_values, db_name, "%s_%s" % (self.tmp_prefix, db_name), query_options)
             str = stepback.getvalue().splitlines(True)
