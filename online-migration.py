@@ -10,6 +10,8 @@ import glob
 import pickle
 import StringIO
 import logging
+import ConfigParser
+import argparse
 
 
 # New imports
@@ -29,11 +31,12 @@ server_password = ''
 
 server_connection = "%s:%s@%s:%s" % (server_user, server_password,
                                      server_host, server_port)
+#server_connection = ""
 
 logging.basicConfig(format = "%(levelname)s : %(message)s", level = logging.INFO)
 
 # script version
-version=0.3
+version=0.4
 
 def memoize(func):
     cache = dict()
@@ -643,6 +646,25 @@ class OnlineMigration(object):
 
 
 def main():
+    
+    # let's add cfg file to deal with the connections
+    # file will be /etc/online-migration.cfg
+    #
+    # content will be like:
+    #
+    # [world]
+    # user=root
+    # password=fred
+    # host=127.0.0.1
+    # port=3340
+    #
+    # [sysbench]
+    # user=test
+    # password=test
+    # host=127.0.0.1
+    # port=3306 
+    
+    
     if len(sys.argv) < 2:
         logging.error("A command is needed\ncommands are: init, create, status, checksum, down, up, diff, version")
         sys.exit(1)
