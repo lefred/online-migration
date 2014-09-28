@@ -365,7 +365,7 @@ class OnlineMigration(object):
         tmp_file = "%s/%04d.schema_tmp" % (db_name, int(version))
         self.create_schema_img(db_name, tmp_file)
         md5check = calculate_md5(tmp_file)
-        #os.remove(tmp_file)
+        os.remove(tmp_file)
         return md5check
 
     def init_migration(self, db_name):
